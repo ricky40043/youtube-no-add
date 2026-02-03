@@ -1,0 +1,21 @@
+{
+    "name": "YouTube Alternative",
+    "short_name": "YT Alt",
+    "description": "無廣告 YouTube 影片播放器，支援背景播放",
+    "start_url": "/",
+    "display": "standalone",
+    "background_color": "#0f0f0f",
+    "theme_color": "#ff0000",
+    "icons": [
+        {
+            "src": "/icon-192.png",
+            "sizes": "192x192",
+            "type": "image/png"
+        },
+        {
+            "src": "/icon-512.png",
+            "sizes": "512x512",
+            "type": "image/png"
+        }
+    ]
+}

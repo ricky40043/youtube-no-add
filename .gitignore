@@ -1,0 +1,21 @@
+# Dependencies
+node_modules
+/frontend/node_modules
+/backend/venv
+venv/
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# System
+.DS_Store
+.vscode
+.idea
+
+# Build
+dist/
+build/
+*.egg-info/
