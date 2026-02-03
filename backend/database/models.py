@@ -19,8 +19,9 @@ class Playlist(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"))
-    title = Column(String, index=True)
+    name = Column(String, index=True)  # Changed from 'title' to match DB schema
     description = Column(Text, nullable=True)
+    is_public = Column(Boolean, default=False)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
@@ -33,10 +34,11 @@ class PlaylistItem(Base):
     id = Column(Integer, primary_key=True, index=True)
     playlist_id = Column(Integer, ForeignKey("playlists.id"))
     video_id = Column(String, index=True)
-    title = Column(String)
-    thumbnail = Column(String)
-    duration = Column(Integer)
-    position = Column(Integer)
+    video_title = Column(String)  # Changed from 'title' to match DB schema
+    video_thumbnail = Column(String)  # Changed from 'thumbnail' to match DB schema
+    video_author = Column(String, nullable=True)
+    video_duration = Column(Integer)  # Changed from 'duration' to match DB schema
+    order_index = Column(Integer)  # Changed from 'position' to match DB schema
     added_at = Column(DateTime, default=datetime.utcnow)
     
     playlist = relationship("Playlist", back_populates="items")
@@ -47,8 +49,10 @@ class WatchHistory(Base):
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"))
     video_id = Column(String, index=True)
-    title = Column(String)
-    thumbnail = Column(String)
+    video_title = Column(String)  # Changed from 'title' to match DB schema
+    video_thumbnail = Column(String)  # Changed from 'thumbnail' to match DB schema
+    video_author = Column(String, nullable=True)
+    video_duration = Column(Integer, nullable=True)
     watched_at = Column(DateTime, default=datetime.utcnow)
     progress_seconds = Column(Integer, default=0)
     

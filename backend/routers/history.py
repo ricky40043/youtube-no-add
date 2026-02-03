@@ -21,13 +21,24 @@ class HistoryCreate(BaseModel):
 class HistoryResponse(BaseModel):
     id: int
     video_id: str
-    title: str
-    thumbnail: str
+    title: str  # Will be mapped from video_title
+    thumbnail: str  # Will be mapped from video_thumbnail
     watched_at: datetime
     progress_seconds: int
 
     class Config:
         orm_mode = True
+
+    @classmethod
+    def from_orm(cls, obj):
+        return cls(
+            id=obj.id,
+            video_id=obj.video_id,
+            title=obj.video_title,  # Map DB 'video_title' to API 'title'
+            thumbnail=obj.video_thumbnail,  # Map DB 'video_thumbnail' to API 'thumbnail'
+            watched_at=obj.watched_at,
+            progress_seconds=obj.progress_seconds
+        )
 
 @router.get("/", response_model=List[HistoryResponse])
 async def get_history(user_id: int, limit: int = 50, db: AsyncSession = Depends(get_db)):
@@ -37,7 +48,8 @@ async def get_history(user_id: int, limit: int = 50, db: AsyncSession = Depends(
         .order_by(WatchHistory.watched_at.desc())
         .limit(limit)
     )
-    return result.scalars().all()
+    items = result.scalars().all()
+    return [HistoryResponse.from_orm(item) for item in items]
 
 @router.post("/", response_model=HistoryResponse)
 async def add_history(item: HistoryCreate, db: AsyncSession = Depends(get_db)):
@@ -54,16 +66,16 @@ async def add_history(item: HistoryCreate, db: AsyncSession = Depends(get_db)):
         existing.progress_seconds = item.progress_seconds
         await db.commit()
         await db.refresh(existing)
-        return existing
+        return HistoryResponse.from_orm(existing)
     
     new_entry = WatchHistory(
         user_id=item.user_id,
         video_id=item.video_id,
-        title=item.title,
-        thumbnail=item.thumbnail,
+        video_title=item.title,  # Map API 'title' to DB 'video_title'
+        video_thumbnail=item.thumbnail,  # Map API 'thumbnail' to DB 'video_thumbnail'
         progress_seconds=item.progress_seconds
     )
     db.add(new_entry)
     await db.commit()
     await db.refresh(new_entry)
-    return new_entry
+    return HistoryResponse.from_orm(new_entry)

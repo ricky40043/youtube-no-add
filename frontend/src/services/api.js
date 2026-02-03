@@ -62,12 +62,42 @@ export const searchApi = {
 
 export const historyApi = {
     get: async (userId) => {
-        const response = await api.get('/api/history', { params: { user_id: userId } })
+        const response = await api.get('/api/history/', { params: { user_id: userId } })
         return response.data
     },
     add: async (data) => {
         // data: { user_id, video_id, title, thumbnail, progress_seconds }
-        const response = await api.post('/api/history', data)
+        const response = await api.post('/api/history/', data)
+        return response.data
+    }
+}
+
+export const playlistApi = {
+    getAll: async (userId) => {
+        const response = await api.get('/api/playlists/', { params: { user_id: userId } })
+        return response.data
+    },
+    create: async (data) => {
+        // data: { title, description, user_id }
+        const response = await api.post('/api/playlists/', data)
+        return response.data
+    },
+    getItems: async (playlistId) => {
+        const response = await api.get(`/api/playlists/${playlistId}/items`)
+        return response.data
+    },
+    addItem: async (playlistId, item) => {
+        // item: { video_id, title, thumbnail, duration, position }
+        const response = await api.post(`/api/playlists/${playlistId}/items`, item)
+        return response.data
+    },
+    delete: async (playlistId) => {
+        const response = await api.delete(`/api/playlists/${playlistId}`)
+        return response.data
+    },
+    update: async (playlistId, data) => {
+        // data: { title, description }
+        const response = await api.put(`/api/playlists/${playlistId}`, data)
         return response.data
     }
 }

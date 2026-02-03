@@ -2,7 +2,8 @@ import { useState, useEffect } from 'react'
 import { useParams } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import VideoPlayer from '../components/VideoPlayer'
-import { videoApi } from '../services/api'
+import AddToPlaylistModal from '../components/AddToPlaylistModal'
+import { videoApi, historyApi, authApi } from '../services/api'
 
 function Watch() {
     const { videoId } = useParams()
@@ -10,6 +11,7 @@ function Watch() {
     const [audioUrl, setAudioUrl] = useState(null)
     const [loading, setLoading] = useState(true)
     const [error, setError] = useState(null)
+    const [showPlaylistModal, setShowPlaylistModal] = useState(false)
 
     useEffect(() => {
         const fetchVideo = async () => {
@@ -29,6 +31,22 @@ function Watch() {
                     setAudioUrl(audio)
                 } catch {
                     // Audio URL is optional
+                }
+
+                // Record to watch history if user is logged in
+                const user = authApi.getCurrentUser()
+                if (user && info) {
+                    try {
+                        await historyApi.add({
+                            user_id: user.id || 1,
+                            video_id: videoId,
+                            title: info.title,
+                            thumbnail: info.thumbnail,
+                            progress_seconds: 0
+                        })
+                    } catch (err) {
+                        console.log('History recording failed (non-critical):', err)
+                    }
                 }
             } catch (err) {
                 console.error('Failed to fetch video:', err)
@@ -105,6 +123,9 @@ function Watch() {
                             alert('連結已複製!')
                         }}>
                             📋 分享
+                        </button>
+                        <button className="action-button" onClick={() => setShowPlaylistModal(true)}>
+                            ➕ 加入播放清單
                         </button>
                     </div>
 
@@ -225,6 +246,12 @@ function Watch() {
                     }
                 }
             `}</style>
+
+            <AddToPlaylistModal
+                isOpen={showPlaylistModal}
+                onClose={() => setShowPlaylistModal(false)}
+                videoInfo={videoInfo}
+            />
         </motion.div>
     )
 }

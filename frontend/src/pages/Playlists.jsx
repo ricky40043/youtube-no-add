@@ -21,10 +21,8 @@ function Playlists() {
 
     const fetchPlaylists = async () => {
         try {
-            // Hardcoded user_id=1 for now (Mock)
-            // Hardcoded user_id=1 for now (Mock)
             const response = await api.get('/api/playlists', {
-                params: { user_id: 1 }
+                params: { user_id: user?.id }
             })
             setPlaylists(response.data)
         } catch (err) {
@@ -40,7 +38,7 @@ function Playlists() {
             await api.post('/api/playlists', {
                 title: newTitle,
                 description: '',
-                user_id: 1 // Mock
+                user_id: user?.id
             })
 
             setNewTitle('')
@@ -60,7 +58,7 @@ function Playlists() {
         try {
             await api.post('/api/playlists/import', {
                 url: importUrl,
-                user_id: 1 // Mock
+                user_id: user?.id
             })
             setImportUrl('')
             setImportMode(false)

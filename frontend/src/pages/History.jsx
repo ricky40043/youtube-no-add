@@ -19,11 +19,9 @@ function History() {
 
         const fetchHistory = async () => {
             try {
-                // Hardcoded user_id=1 for now until full auth integration
-                // In real app, we get this from token/context or /me endpoint
-
-                const response = await api.get('/api/history', {
-                    params: { user_id: 1 } // Mock ID, real backend uses token
+                // Use the actual user id from auth context
+                const response = await api.get('/api/history/', {
+                    params: { user_id: user.id }
                 })
                 setHistory(response.data)
             } catch (err) {
