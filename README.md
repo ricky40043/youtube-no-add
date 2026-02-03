@@ -4,7 +4,23 @@
 
 ## 🚀 快速開始
 
-### 使用 Docker Compose 啟動
+## 🚀 快速開始
+
+### ⚡️ 一鍵啟動 (推薦)
+
+我們提供了懶人腳本，幫您自動完成環境建置與啟動：
+
+**Mac / Linux:**
+```bash
+./setup.sh  # 第一次執行 (建置環境)
+./start.sh  # 日常啟動
+```
+
+**Windows:**
+1. 雙擊 `setup.bat` (第一次執行)
+2. 雙擊 `start.bat` (日常啟動)
+
+### 手動啟動 (Docker Compose)
 
 ```bash
 # 建置並啟動所有服務
