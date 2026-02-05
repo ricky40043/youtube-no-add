@@ -65,7 +65,7 @@ function Playlists() {
             fetchPlaylists()
         } catch (err) {
             console.error(err)
-            alert('Failed to import playlist. Please check the URL.')
+            alert('匯入播放清單失敗，請確認網址是否正確。')
         } finally {
             setLoading(false)
         }
@@ -74,19 +74,19 @@ function Playlists() {
     return (
         <div className="playlists-page">
             <header className="page-header">
-                <h1>My Playlists</h1>
+                <h1>我的播放清單</h1>
                 <div className="actions">
                     <button
                         className="create-btn"
                         onClick={() => { setCreateMode(!createMode); setImportMode(false); }}
                     >
-                        + Create
+                        + 建立
                     </button>
                     <button
                         className="import-btn"
                         onClick={() => { setImportMode(!importMode); setCreateMode(false); }}
                     >
-                        Import YouTube
+                        匯入 YouTube
                     </button>
                 </div>
             </header>
@@ -96,12 +96,12 @@ function Playlists() {
                     <input
                         autoFocus
                         type="text"
-                        placeholder="Playlist Title"
+                        placeholder="播放清單名稱"
                         value={newTitle}
                         onChange={(e) => setNewTitle(e.target.value)}
                         required
                     />
-                    <button type="submit">Create</button>
+                    <button type="submit">建立</button>
                 </form>
             )}
 
@@ -110,20 +110,20 @@ function Playlists() {
                     <input
                         autoFocus
                         type="text"
-                        placeholder="YouTube Playlist URL (e.g. https://www.youtube.com/playlist?list=...)"
+                        placeholder="YouTube 播放清單網址 (例如 https://www.youtube.com/playlist?list=...)"
                         value={importUrl}
                         onChange={(e) => setImportUrl(e.target.value)}
                         required
                     />
-                    <button type="submit">Import</button>
+                    <button type="submit">匯入</button>
                 </form>
             )}
 
             {loading ? (
-                <div className="loading">Loading playlists...</div>
+                <div className="loading">載入播放清單中...</div>
             ) : playlists.length === 0 ? (
                 <div className="empty-state">
-                    No playlists yet. Create one to organize your videos!
+                    尚無播放清單。建立一個來整理您的影片！
                 </div>
             ) : (
                 <div className="playlist-grid">
@@ -135,8 +135,8 @@ function Playlists() {
                         >
                             <div className="card-content">
                                 <h3>{pl.title}</h3>
-                                <p>{pl.items_count || 0} videos</p>
-                                <span className="date">Created {new Date(pl.created_at).toLocaleDateString()}</span>
+                                <p>{pl.items_count || 0} 部影片</p>
+                                <span className="date">建立於 {new Date(pl.created_at).toLocaleDateString()}</span>
                             </div>
                         </div>
                     ))}

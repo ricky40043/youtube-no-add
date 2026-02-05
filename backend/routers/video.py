@@ -93,7 +93,41 @@ async def get_audio_url(video_id: str):
             if audio_streams:
                 url = audio_streams[0]["url"]
     
+    
     if not url:
         raise HTTPException(status_code=404, detail="Audio stream not found")
     
     return {"url": url}
+
+
+@router.get("/related/{video_id}")
+async def get_related_videos(video_id: str):
+    """
+    獲取相關影片（透過標題搜尋模擬）
+    
+    - **video_id**: YouTube 影片 ID
+    """
+    # 1. Get video info to find title
+    # We use get_video_info which handles caching
+    try:
+        info = await get_video_info(video_id)
+    except Exception:
+        # If video not found, can't find related
+        raise HTTPException(status_code=404, detail="Original video not found")
+        
+    title = info.get("title")
+    if not title:
+         raise HTTPException(status_code=404, detail="Video title not found")
+         
+    # 2. Search for videos with similar title
+    # Remove special chars or Keep it simple?
+    # Simple search is usually fine.
+    
+    # We intentionally search for slightly more to filter out self
+    results = await ytdlp_service.search(title, max_results=10)
+    
+    # 3. Filter out current video and return
+    filtered = [v for v in results if v['id'] != video_id]
+    
+    # Limit to 10
+    return filtered[:10]

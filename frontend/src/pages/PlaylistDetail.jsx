@@ -72,8 +72,8 @@ function PlaylistDetail() {
         }
     }
 
-    if (loading) return <div className="loading">Loading...</div>
-    if (!playlist) return <div className="error">Playlist not found</div>
+    if (loading) return <div className="loading">載入中...</div>
+    if (!playlist) return <div className="error">找不到播放清單</div>
 
     return (
         <div className="playlist-detail-page">
@@ -108,12 +108,12 @@ function PlaylistDetail() {
                         </>
                     )}
                     <div className="stats">
-                        {items.length} videos • Created {new Date(playlist.created_at).toLocaleDateString()}
+                        {items.length} 部影片 • 建立於 {new Date(playlist.created_at).toLocaleDateString()}
                     </div>
                 </div>
                 <div className="header-actions">
-                    <button className="play-all-btn" onClick={() => items.length > 0 && navigate(`/watch/${items[0].video_id}`)}>
-                        ▶ Play All
+                    <button className="play-all-btn" onClick={() => items.length > 0 && navigate(`/watch/${items[0].video_id}?list=${id}&index=0`)}>
+                        ▶ 播放全部
                     </button>
                     <button className="delete-btn" onClick={() => setShowDeleteConfirm(true)}>
                         刪除清單
@@ -124,17 +124,17 @@ function PlaylistDetail() {
             <div className="items-list">
                 {items.length === 0 ? (
                     <div className="empty-state">
-                        This playlist is empty.
+                        此播放清單是空的。
                     </div>
                 ) : (
                     items.map((item, index) => (
                         <div key={item.id} className="playlist-item">
                             <span className="index">{index + 1}</span>
-                            <div className="thumbnail" onClick={() => navigate(`/watch/${item.video_id}`)}>
+                            <div className="thumbnail" onClick={() => navigate(`/watch/${item.video_id}?list=${id}&index=${index}`)}>
                                 <img src={item.thumbnail || item.video_thumbnail} alt={item.title || item.video_title} />
                                 <span className="duration">{formatDuration(item.duration || item.video_duration)}</span>
                             </div>
-                            <div className="info" onClick={() => navigate(`/watch/${item.video_id}`)}>
+                            <div className="info" onClick={() => navigate(`/watch/${item.video_id}?list=${id}&index=${index}`)}>
                                 <h3>{item.title || item.video_title}</h3>
                             </div>
                             <button

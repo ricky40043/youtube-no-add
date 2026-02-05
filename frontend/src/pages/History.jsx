@@ -40,13 +40,13 @@ function History() {
     return (
         <div className="history-page">
             <header className="page-header">
-                <h1>Watch History</h1>
+                <h1>觀看紀錄</h1>
             </header>
 
             {loading ? (
-                <div className="loading">Loading history...</div>
+                <div className="loading">載入紀錄中...</div>
             ) : history.length === 0 ? (
-                <div className="empty-state">No watch history yet.</div>
+                <div className="empty-state">尚無觀看紀錄。</div>
             ) : (
                 <div className="video-grid">
                     {history.map(item => (

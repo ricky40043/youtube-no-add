@@ -7,9 +7,14 @@ function Navbar() {
     const [user, setUser] = useState(authApi.getCurrentUser())
     const navigate = useNavigate()
 
-    // Check user status on mount (simple implementation)
     useEffect(() => {
-        setUser(authApi.getCurrentUser())
+        const checkUser = () => {
+            setUser(authApi.getCurrentUser())
+        }
+
+        checkUser()
+        window.addEventListener('auth-change', checkUser)
+        return () => window.removeEventListener('auth-change', checkUser)
     }, [])
 
     const handleLogout = () => {
@@ -62,14 +67,14 @@ function Navbar() {
             <div className="navbar-actions">
                 {user ? (
                     <div className="user-menu">
-                        <span className="username" onClick={() => navigate('/history')} style={{ cursor: 'pointer' }} title="History">🕒</span>
-                        <span className="username" onClick={() => navigate('/playlists')} style={{ cursor: 'pointer' }} title="Playlists">📂</span>
+                        <span className="username" onClick={() => navigate('/history')} style={{ cursor: 'pointer' }} title="觀看紀錄">🕒</span>
+                        <span className="username" onClick={() => navigate('/playlists')} style={{ cursor: 'pointer' }} title="我的播放清單">📂</span>
                         <span className="username">{user.username}</span>
-                        <button onClick={handleLogout} className="auth-btn">Logout</button>
+                        <button onClick={handleLogout} className="logout-btn">登出</button>
                     </div>
                 ) : (
                     <button onClick={() => navigate('/auth')} className="auth-btn login-btn">
-                        Login
+                        登入
                     </button>
                 )}
             </div>

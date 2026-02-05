@@ -32,6 +32,12 @@ export const videoApi = {
     getStreamUrl: (videoId, quality = 'audio') => {
         return `${API_URL}/api/video/stream/${encodeURIComponent(videoId)}?quality=${quality}`
     },
+
+    // Get related videos
+    getRelated: async (videoId) => {
+        const response = await api.get(`/api/video/related/${encodeURIComponent(videoId)}`)
+        return response.data
+    },
 }
 
 export const searchApi = {
@@ -117,6 +123,7 @@ export const authApi = {
             if (response.data.user_id) {
                 localStorage.setItem('userId', response.data.user_id)
             }
+            window.dispatchEvent(new Event('auth-change'))
         }
         return response.data
     },
@@ -130,6 +137,7 @@ export const authApi = {
         localStorage.removeItem('token')
         localStorage.removeItem('username')
         localStorage.removeItem('userId')
+        window.dispatchEvent(new Event('auth-change'))
     },
 
     getCurrentUser: () => {

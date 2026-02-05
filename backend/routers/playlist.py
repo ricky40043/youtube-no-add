@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy.orm import selectinload
+from sqlalchemy import func
 from database.connection import get_db
 from database.models import User, Playlist, PlaylistItem
 from services.ytdlp_service import ytdlp_service
@@ -83,13 +84,21 @@ class PlaylistItemResponse(BaseModel):
 @router.get("/", response_model=List[PlaylistResponse])
 async def get_playlists(user_id: int, db: AsyncSession = Depends(get_db)):
     # TODO: Get user_id from auth token dependency
-    result = await db.execute(
-        select(Playlist)
+    # Query Playlists with a count of their items
+    stmt = (
+        select(Playlist, func.count(PlaylistItem.id).label("item_count"))
+        .outerjoin(PlaylistItem, Playlist.id == PlaylistItem.playlist_id)
         .filter(Playlist.user_id == user_id)
-        .options(selectinload(Playlist.items))  # Load items to count them
+        .group_by(Playlist.id)
     )
-    playlists = result.scalars().all()
-    return [PlaylistResponse.from_orm(p, items_count=len(p.items)) for p in playlists]
+    result = await db.execute(stmt)
+    # result contains (Playlist, count) tuples
+    playlists_with_counts = result.all()
+    
+    return [
+        PlaylistResponse.from_orm(p, items_count=count) 
+        for p, count in playlists_with_counts
+    ]
 
 @router.post("/", response_model=PlaylistResponse)
 async def create_playlist(playlist: PlaylistCreate, db: AsyncSession = Depends(get_db)):
@@ -113,14 +122,49 @@ async def get_playlist(playlist_id: int, db: AsyncSession = Depends(get_db)):
     return PlaylistResponse.from_orm(playlist)
 
 @router.get("/{playlist_id}/items", response_model=List[PlaylistItemResponse])
-async def get_playlist_items(playlist_id: int, db: AsyncSession = Depends(get_db)):
-    result = await db.execute(
-        select(PlaylistItem)
-        .filter(PlaylistItem.playlist_id == playlist_id)
-        .order_by(PlaylistItem.order_index)  # Changed from 'position' to 'order_index'
-    )
-    items = result.scalars().all()
-    return [PlaylistItemResponse.from_orm(item) for item in items]
+async def get_playlist_items(playlist_id: str, db: AsyncSession = Depends(get_db)):
+    # Check if playlist_id is numeric (Internal DB ID)
+    if playlist_id.isdigit():
+        pid = int(playlist_id)
+        result = await db.execute(
+            select(PlaylistItem)
+            .filter(PlaylistItem.playlist_id == pid)
+            .order_by(PlaylistItem.order_index)
+        )
+        items = result.scalars().all()
+        return [PlaylistItemResponse.from_orm(item) for item in items]
+    else:
+        # Assume it's an external YouTube Playlist ID - Fetch transiently
+        try:
+            # Construct a full URL to reuse existing service logic or call search
+            # Since we have ytdlp_service.get_playlist_info which takes a URL
+            playlist_url = f"https://www.youtube.com/playlist?list={playlist_id}"
+            info = await ytdlp_service.get_playlist_info(playlist_url)
+            
+            if not info or not info.get('items'):
+                # Return empty list or 404? 
+                # Better to return empty list so UI doesn't crash, or 404 if truly invalid
+                print(f"Transient playlist fetch failed for {playlist_id}")
+                return []
+                
+            # Convert dict items to PlaylistItemResponse schema
+            # We need to map the dict keys to the Response model keys
+            response_items = []
+            for idx, item in enumerate(info['items']):
+                response_items.append(PlaylistItemResponse(
+                    id=0, # Transient, no DB ID
+                    video_id=item['video_id'],
+                    title=item['title'],
+                    thumbnail=item['thumbnail'],
+                    duration=item.get('duration') or 0,
+                    position=idx,
+                    added_at=datetime.utcnow()
+                ))
+            return response_items
+            
+        except Exception as e:
+            print(f"Error fetching transient playlist: {e}")
+            raise HTTPException(status_code=404, detail="Playlist not found or invalid")
 
 @router.post("/{playlist_id}/items", response_model=PlaylistItemResponse)
 async def add_item_to_playlist(playlist_id: int, item: PlaylistItemBase, db: AsyncSession = Depends(get_db)):
@@ -199,7 +243,7 @@ async def import_playlist(request: ImportPlaylistRequest, db: AsyncSession = Dep
     
     # 2. Create Playlist
     new_playlist = Playlist(
-        title=info['title'],
+        name=info['title'],
         description=f"Imported from YouTube (Original ID: {info['id']})",
         user_id=request.user_id 
     )
@@ -214,12 +258,12 @@ async def import_playlist(request: ImportPlaylistRequest, db: AsyncSession = Dep
         new_item = PlaylistItem(
             playlist_id=new_playlist.id,
             video_id=item['video_id'],
-            title=item['title'],
-            thumbnail=item['thumbnail'],
-            duration=item['duration'],
-            position=idx
+            video_title=item['title'],
+            video_thumbnail=item['thumbnail'],
+            video_duration=item['duration'],
+            order_index=idx
         )
         db.add(new_item)
     
     await db.commit()
-    return new_playlist
+    return PlaylistResponse.from_orm(new_playlist, items_count=len(info['items']))

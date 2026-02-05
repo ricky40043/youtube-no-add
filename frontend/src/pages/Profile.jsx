@@ -56,15 +56,15 @@ function Profile() {
                     <p>@{user.username}</p>
                 </div>
                 <button onClick={handleLogout} className="logout-btn">
-                    Logout
+                    登出
                 </button>
             </div>
 
             {/* History Section */}
             <div className="profile-section">
                 <div className="section-header">
-                    <h2>History</h2>
-                    <button onClick={() => navigate('/history')}>View All</button>
+                    <h2>觀看紀錄</h2>
+                    <button onClick={() => navigate('/history')}>查看全部</button>
                 </div>
                 {history.length > 0 ? (
                     <div className="horizontal-scroll-list">
@@ -78,15 +78,15 @@ function Profile() {
                         ))}
                     </div>
                 ) : (
-                    <p className="empty-state">No watch history yet</p>
+                    <p className="empty-state">尚無觀看紀錄</p>
                 )}
             </div>
 
             {/* Playlists Section */}
             <div className="profile-section">
                 <div className="section-header">
-                    <h2>Playlists</h2>
-                    <button onClick={() => navigate('/playlists')}>View All</button>
+                    <h2>播放清單</h2>
+                    <button onClick={() => navigate('/playlists')}>查看全部</button>
                 </div>
                 {playlists.length > 0 ? (
                     <div className="playlist-list">
@@ -95,13 +95,13 @@ function Profile() {
                                 <div className="playlist-icon">📂</div>
                                 <div className="playlist-info">
                                     <h3>{playlist.title}</h3>
-                                    <p>{playlist.items ? playlist.items.length : 0} videos</p>
+                                    <p>{playlist.items ? playlist.items.length : 0} 部影片</p>
                                 </div>
                             </div>
                         ))}
                     </div>
                 ) : (
-                    <p className="empty-state">No playlists created</p>
+                    <p className="empty-state">尚無播放清單</p>
                 )}
             </div>
 

@@ -7,7 +7,7 @@ function AddToPlaylistModal({ isOpen, onClose, videoInfo }) {
     const [loading, setLoading] = useState(true)
     const [selectedIds, setSelectedIds] = useState(new Set())
     const [saving, setSaving] = useState(false)
-    const [createMode, setCreateMode] = useState(false)
+    const [showCreateForm, setShowCreateForm] = useState(false)
     const [newTitle, setNewTitle] = useState('')
     const [message, setMessage] = useState('')
 
@@ -56,7 +56,7 @@ function AddToPlaylistModal({ isOpen, onClose, videoInfo }) {
             setPlaylists([...playlists, response.data])
             setSelectedIds(new Set([...selectedIds, response.data.id]))
             setNewTitle('')
-            setCreateMode(false)
+            setShowCreateForm(false)
         } catch (err) {
             console.error('Failed to create playlist:', err)
         }
@@ -156,54 +156,52 @@ function AddToPlaylistModal({ isOpen, onClose, videoInfo }) {
                                     {playlists.length === 0 ? (
                                         <p className="empty-hint">尚無播放清單，請先建立一個</p>
                                     ) : (
-                                        playlists.map(pl => (
+                                        playlists.map(playlist => ( // Changed pl to playlist
                                             <label
-                                                key={pl.id}
-                                                className={`playlist-option ${selectedIds.has(pl.id) ? 'selected' : ''}`}
+                                                key={playlist.id}
+                                                className={`playlist-option ${selectedIds.has(playlist.id) ? 'selected' : ''}`}
                                             >
                                                 <input
                                                     type="checkbox"
-                                                    checked={selectedIds.has(pl.id)}
-                                                    onChange={() => toggleSelect(pl.id)}
+                                                    checked={selectedIds.has(playlist.id)}
+                                                    onChange={() => toggleSelect(playlist.id)}
                                                 />
                                                 <span className="checkbox-custom">
-                                                    {selectedIds.has(pl.id) ? '✓' : ''}
+                                                    {selectedIds.has(playlist.id) ? '✓' : ''}
                                                 </span>
-                                                <span className="playlist-name">{pl.title}</span>
+                                                <span className="playlist-name">{playlist.title}</span>
+                                                {/* <span className="video-count">{playlist.items_count} videos</span> */} {/* Commented out */}
                                             </label>
                                         ))
                                     )}
                                 </div>
 
-                                {createMode ? (
-                                    <form className="create-form" onSubmit={handleCreate}>
+                                {showCreateForm ? ( // Changed createMode to showCreateForm
+                                    <form className="create-playlist-form" onSubmit={handleCreate}> {/* Changed class name */}
                                         <input
                                             type="text"
-                                            placeholder="新播放清單名稱"
+                                            placeholder="播放清單名稱" // Translated placeholder
                                             value={newTitle}
                                             onChange={e => setNewTitle(e.target.value)}
                                             autoFocus
+                                            required // Added required attribute
                                         />
-                                        <button type="submit">建立</button>
-                                        <button type="button" onClick={() => setCreateMode(false)}>取消</button>
+                                        <div className="form-actions"> {/* Added form-actions div */}
+                                            <button type="button" onClick={() => setShowCreateForm(false)}>取消</button> {/* Translated button, changed setCreateMode */}
+                                            <button type="submit" disabled={!newTitle.trim()}>建立</button> {/* Translated button, added disabled */}
+                                        </div>
                                     </form>
                                 ) : (
                                     <button
                                         className="new-playlist-btn"
-                                        onClick={() => setCreateMode(true)}
+                                        onClick={() => setShowCreateForm(true)} // Changed setCreateMode
                                     >
                                         + 新增播放清單
                                     </button>
                                 )}
 
-                                {message && (
-                                    <div className={`message ${message.includes('✓') ? 'success' : 'error'}`}>
-                                        {message}
-                                    </div>
-                                )}
-
                                 <div className="modal-actions">
-                                    <button className="cancel-btn" onClick={onClose}>取消</button>
+                                    <button className="cancel-btn" onClick={onClose}>取消</button> {/* Translated button */}
                                     <button
                                         className="save-btn"
                                         onClick={handleSave}

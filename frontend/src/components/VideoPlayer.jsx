@@ -88,7 +88,15 @@ function VideoPlayer({ videoInfo, audioUrl, onEnded }) {
 
         // Check if HLS stream
         if (streamUrl.includes('.m3u8')) {
+            // Check if HLS instance already exists and source is same
+            if (hlsRef.current && hlsRef.current.url === streamUrl) {
+                return
+            }
+
             if (Hls.isSupported()) {
+                if (hlsRef.current) {
+                    hlsRef.current.destroy()
+                }
                 const hls = new Hls({
                     enableWorker: true,
                     lowLatencyMode: true,
@@ -101,13 +109,17 @@ function VideoPlayer({ videoInfo, audioUrl, onEnded }) {
                 })
             } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
                 // Safari native HLS
-                video.src = streamUrl
-                video.play().catch(console.error)
+                if (video.src !== streamUrl) {
+                    video.src = streamUrl
+                    video.play().catch(console.error)
+                }
             }
         } else {
             // Direct video URL
-            video.src = streamUrl
-            video.play().catch(console.error)
+            if (video.src !== streamUrl) {
+                video.src = streamUrl
+                video.play().catch(console.error)
+            }
         }
 
         return () => {
@@ -141,22 +153,10 @@ function VideoPlayer({ videoInfo, audioUrl, onEnded }) {
 
     const handlePlayEvent = () => {
         setIsPlaying(true)
-        // Add to history
-        import('../services/api').then(({ historyApi, authApi }) => {
-            const currentUser = authApi.getCurrentUser()
-            if (currentUser && currentUser.id && videoInfo) {
-                historyApi.add({
-                    user_id: currentUser.id,
-                    video_id: videoInfo.id,
-                    title: videoInfo.title,
-                    thumbnail: videoInfo.thumbnail,
-                    progress_seconds: Math.floor(currentTime)
-                }).catch(err => console.error("Failed to save history", err))
-            }
-        })
     }
     const handlePauseEvent = () => setIsPlaying(false)
     const handleEndedEvent = () => {
+        console.log('[VideoPlayer] Video ended event fired.')
         setIsPlaying(false)
         onEnded?.()
     }
@@ -248,7 +248,7 @@ function VideoPlayer({ videoInfo, audioUrl, onEnded }) {
             isLongPressing.current = true
             if (videoRef.current) {
                 videoRef.current.playbackRate = 2.0
-                setFeedback({ show: true, text: '2x Speed', icon: '⏩' })
+                setFeedback({ show: true, text: '2倍速', icon: '⏩' })
             }
         }, 500)
     }
@@ -287,11 +287,11 @@ function VideoPlayer({ videoInfo, audioUrl, onEnded }) {
             if (x < width * 0.35) {
                 // Left: Seek Backward
                 handleSeekBackward(5)
-                setFeedback({ show: true, text: '5s', icon: '⏪' })
+                setFeedback({ show: true, text: '5秒', icon: '⏪' })
             } else if (x > width * 0.65) {
                 // Right: Seek Forward
                 handleSeekForward(5)
-                setFeedback({ show: true, text: '5s', icon: '⏩' })
+                setFeedback({ show: true, text: '5秒', icon: '⏩' })
             } else {
                 // Center: Toggle Play/Pause
                 handleVideoClick()

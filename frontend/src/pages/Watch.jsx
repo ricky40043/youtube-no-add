@@ -1,17 +1,88 @@
-import { useState, useEffect } from 'react'
-import { useParams } from 'react-router-dom'
+import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useParams, useNavigate, useLocation } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import VideoPlayer from '../components/VideoPlayer'
 import AddToPlaylistModal from '../components/AddToPlaylistModal'
-import { videoApi, historyApi, authApi } from '../services/api'
+import { videoApi, historyApi, authApi, playlistApi } from '../services/api'
 
 function Watch() {
     const { videoId } = useParams()
+    const navigate = useNavigate()
+    const location = useLocation()
+    const searchParams = new URLSearchParams(location.search)
+    const playlistId = searchParams.get('list')
+    const initialIndex = parseInt(searchParams.get('index') || '0')
+
     const [videoInfo, setVideoInfo] = useState(null)
     const [audioUrl, setAudioUrl] = useState(null)
     const [loading, setLoading] = useState(true)
     const [error, setError] = useState(null)
+    const [playlistError, setPlaylistError] = useState(null) // New error state
     const [showPlaylistModal, setShowPlaylistModal] = useState(false)
+
+    // Playlist state
+    const [playlistItems, setPlaylistItems] = useState([])
+    const [playlistTitle, setPlaylistTitle] = useState('')
+    const [currentIndex, setCurrentIndex] = useState(initialIndex)
+    const [isShuffle, setIsShuffle] = useState(false)
+    const [shuffledIndices, setShuffledIndices] = useState([])
+
+    // Related videos state (for auto-play when no playlist)
+    const [relatedVideos, setRelatedVideos] = useState([])
+
+    // Fetch Playlist Data
+    useEffect(() => {
+        if (!playlistId) return
+
+        const fetchPlaylist = async () => {
+            console.log('[Watch] Fetching playlist:', playlistId)
+            try {
+                setPlaylistError(null)
+                // We don't have a direct "get playlist info" that returns items + title conveniently in one go for generic lists
+                // But for now let's assume we can get items.
+                // If it's a Youtube import, we stored it in DB.
+                const items = await playlistApi.getItems(playlistId)
+                console.log('[Watch] Playlist loaded, count:', items?.length)
+                if (Array.isArray(items)) {
+                    setPlaylistItems(items)
+                } else {
+                    throw new Error('Invalid playlist response')
+                }
+
+                // Also try to get title
+                try {
+                    const playlists = await playlistApi.getAll(authApi.getCurrentUser()?.id)
+                    const currentList = playlists.find(p => p.id.toString() === playlistId)
+                    if (currentList) setPlaylistTitle(currentList.title)
+                } catch (e) {
+                    // ignore title fetch error if transient
+                    if (!playlistTitle) setPlaylistTitle(`Playlist ${playlistId}`)
+                }
+
+            } catch (err) {
+                console.error("Failed to load playlist", err)
+                setPlaylistError(err.message || '無法載入播放清單')
+            }
+        }
+        fetchPlaylist()
+    }, [playlistId])
+
+    // Generate shuffled indices when shuffle is toggled or items change
+    useEffect(() => {
+        if (!playlistItems.length) return
+        if (isShuffle) {
+            const indices = playlistItems.map((_, i) => i)
+            // Fisher-Yates shuffle
+            for (let i = indices.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [indices[i], indices[j]] = [indices[j], indices[i]];
+            }
+            // Ensure current video is first if possible, or just play through
+            setShuffledIndices(indices)
+        } else {
+            setShuffledIndices([])
+        }
+    }, [isShuffle, playlistItems])
 
     useEffect(() => {
         const fetchVideo = async () => {
@@ -23,33 +94,43 @@ function Watch() {
 
                 // Fetch video info
                 const info = await videoApi.getInfo(videoId)
+                console.log('[Watch] Info received:', info?.title)
                 setVideoInfo(info)
 
-                // Also get audio URL for background playback fallback
+                // Also get audio URL
                 try {
                     const audio = await videoApi.getAudioUrl(videoId)
                     setAudioUrl(audio)
                 } catch {
-                    // Audio URL is optional
+                    // ignore
                 }
 
-                // Record to watch history if user is logged in
+
+                // Fetch related videos (background)
+                if (!playlistId) {
+                    videoApi.getRelated(videoId)
+                        .then(related => {
+                            console.log('[Watch] Related videos loaded:', related.length)
+                            setRelatedVideos(related)
+                        })
+                        .catch(err => console.warn('[Watch] Failed to load related videos', err))
+                }
+
+                // Record to watch history
                 const user = authApi.getCurrentUser()
                 if (user && info) {
-                    try {
-                        await historyApi.add({
-                            user_id: user.id || 1,
-                            video_id: videoId,
-                            title: info.title,
-                            thumbnail: info.thumbnail,
-                            progress_seconds: 0
-                        })
-                    } catch (err) {
-                        console.log('History recording failed (non-critical):', err)
-                    }
+                    console.log('[Watch] Saving history...')
+                    historyApi.add({
+                        user_id: user.id || 1,
+                        video_id: videoId,
+                        title: info.title,
+                        thumbnail: info.thumbnail,
+                        progress_seconds: 0
+                    }).then(() => console.log('[Watch] History saved'))
+                        .catch(err => console.log('[Watch] History save failed:', err))
                 }
             } catch (err) {
-                console.error('Failed to fetch video:', err)
+                console.error('[Watch] Failed to fetch video:', err)
                 setError('無法載入影片，請確認連結是否正確')
             } finally {
                 setLoading(false)
@@ -58,6 +139,62 @@ function Watch() {
 
         fetchVideo()
     }, [videoId])
+
+    // Auto-play next logic
+    const handleVideoEnd = useCallback(() => {
+        console.log('[Watch] Video ended. Checking auto-play...')
+
+        // Priority 1: Playlist
+        if (playlistItems.length > 0) {
+            let nextIndex
+            if (isShuffle) {
+                // Find current in shuffled list
+                const currentShufflePos = shuffledIndices.findIndex(idx =>
+                    playlistItems[idx]?.video_id === videoId
+                )
+                if (currentShufflePos !== -1 && currentShufflePos < shuffledIndices.length - 1) {
+                    nextIndex = shuffledIndices[currentShufflePos + 1]
+                } else {
+                    nextIndex = shuffledIndices[0]
+                }
+            } else {
+                // Sequential
+                const currentPos = playlistItems.findIndex(item => item.video_id === videoId)
+                if (currentPos !== -1 && currentPos < playlistItems.length - 1) {
+                    nextIndex = currentPos + 1
+                } else {
+                    nextIndex = 0
+                }
+            }
+
+            if (nextIndex !== undefined && playlistItems[nextIndex]) {
+                console.log('[Watch] Auto-playing NEXT in playlist:', nextIndex)
+                navigate(`/watch/${playlistItems[nextIndex].video_id}?list=${playlistId}&index=${nextIndex}`)
+                return
+            }
+        }
+
+        // Priority 2: Related Videos (if no playlist)
+        if (!playlistId && relatedVideos.length > 0) {
+            console.log('[Watch] Auto-playing RELATED video:', relatedVideos[0].title)
+            navigate(`/watch/${relatedVideos[0].id}`)
+            return
+        }
+
+        console.log('[Watch] No next video to play.')
+        console.log('[Watch] No next video to play.')
+    }, [playlistItems, videoId, playlistId, isShuffle, shuffledIndices, relatedVideos, navigate])
+
+    // Auto-skip on error in playlist mode
+    useEffect(() => {
+        if (error && playlistId && playlistItems.length > 0) {
+            console.log('[Watch] Error detected in playlist. Auto-skipping in 2s...')
+            const timer = setTimeout(() => {
+                handleVideoEnd()
+            }, 2000)
+            return () => clearTimeout(timer)
+        }
+    }, [error, playlistId, playlistItems, handleVideoEnd])
 
     // Update document title
     useEffect(() => {
@@ -82,12 +219,20 @@ function Watch() {
             <div className="error-message">
                 <h2>😕 播放失敗</h2>
                 <p>{error}</p>
+                {playlistId && (
+                    <p style={{ color: 'var(--accent-color)', fontWeight: 'bold' }}>
+                        即將播放下一首...
+                    </p>
+                )}
                 <p style={{ marginTop: '16px', fontSize: '0.9rem', color: '#717171' }}>
                     Video ID: {videoId}
                 </p>
             </div>
         )
     }
+
+    // Playlist loading state
+    const isPlaylistLoading = playlistId && playlistItems.length === 0
 
     return (
         <motion.div
@@ -108,6 +253,7 @@ function Watch() {
                     <VideoPlayer
                         videoInfo={videoInfo}
                         audioUrl={audioUrl}
+                        onEnded={handleVideoEnd}
                     />
                 </div>
 
@@ -115,6 +261,15 @@ function Watch() {
                     <h1>{videoInfo?.title}</h1>
 
                     <div className="video-actions">
+                        {playlistId && (
+                            <button
+                                className={`action-button ${isShuffle ? 'active' : ''}`}
+                                onClick={() => setIsShuffle(!isShuffle)}
+                                style={{ background: isShuffle ? '#fff' : 'var(--bg-secondary)', color: isShuffle ? '#000' : 'inherit' }}
+                            >
+                                🔀 隨機播放
+                            </button>
+                        )}
                         <span className="action-button">
                             👁️ {formatViews(videoInfo?.view_count)}
                         </span>
@@ -128,6 +283,44 @@ function Watch() {
                             ➕ 加入播放清單
                         </button>
                     </div>
+
+                    {playlistId && (
+                        <div className="playlist-panel">
+                            <h3>從播放清單播放中: {playlistTitle || '載入中...'}</h3>
+                            {playlistError ? (
+                                <div className="error-message" style={{ padding: '20px', color: 'red', textAlign: 'center' }}>
+                                    播放清單載入失敗: {playlistError}<br />
+                                    <small>ID: {playlistId}</small>
+                                </div>
+                            ) : isPlaylistLoading ? (
+                                <div style={{ padding: '20px', textAlign: 'center', color: '#aaa' }}>
+                                    載入播放清單中... (ID: {playlistId})
+                                </div>
+                            ) : (
+                                <>
+                                    <div style={{ padding: '0 16px 8px', fontSize: '0.8rem', color: '#aaa' }}>
+                                        {playlistItems.findIndex(i => i.video_id === videoId) + 1} / {playlistItems.length}
+                                        <span style={{ float: 'right', opacity: 0.5 }}> Debug: {playlistId?.substring(0, 5)}... </span>
+                                    </div>
+                                    <div className="playlist-items-scroll">
+                                        {playlistItems.map((item, idx) => (
+                                            <div
+                                                key={item.id || idx}
+                                                className={`playlist-item ${item.video_id === videoId ? 'current' : ''}`}
+                                                onClick={() => navigate(`/watch/${item.video_id}?list=${playlistId}&index=${idx}`)}
+                                            >
+                                                <span className="index">{idx + 1}</span>
+                                                <img src={item.thumbnail} alt="" />
+                                                <div className="info">
+                                                    <div className="title">{item.title}</div>
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </>
+                            )}
+                        </div>
+                    )}
 
                     <div className="video-description">
                         <p className="author-name">
@@ -186,6 +379,70 @@ function Watch() {
                     border-radius: 20px;
                     font-size: 0.9rem;
                     white-space: nowrap;
+                    cursor: pointer;
+                    border: none;
+                    color: white;
+                }
+
+                .playlist-panel {
+                    margin-bottom: 16px;
+                    border: 1px solid #333;
+                    border-radius: 12px;
+                    background: #1e1e1e;
+                    overflow: hidden;
+                }
+
+                .playlist-panel h3 {
+                    padding: 12px 16px;
+                    font-size: 0.9rem;
+                    background: #2a2a2a;
+                    margin: 0;
+                }
+
+                .playlist-items-scroll {
+                    max-height: 200px;
+                    overflow-y: auto;
+                }
+
+                .playlist-item {
+                    display: flex;
+                    align-items: center;
+                    padding: 8px 12px;
+                    gap: 10px;
+                    cursor: pointer;
+                }
+
+                .playlist-item:hover {
+                    background: #333;
+                }
+
+                .playlist-item.current {
+                    background: #3a3a3a;
+                }
+
+                .playlist-item .index {
+                    color: #aaa;
+                    font-size: 0.8rem;
+                    min-width: 20px;
+                }
+
+                .playlist-item img {
+                    width: 60px;
+                    height: 34px;
+                    object-fit: cover;
+                    border-radius: 4px;
+                }
+
+                .playlist-item .info {
+                     flex: 1;
+                     overflow: hidden;
+                }
+                
+                .playlist-item .title {
+                    font-size: 0.85rem;
+                    white-space: nowrap;
+                    overflow: hidden;
+                    text-overflow: ellipsis;
                 }
                 
                 .video-description {

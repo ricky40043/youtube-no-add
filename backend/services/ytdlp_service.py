@@ -213,6 +213,19 @@ class YtDlpService:
         if "list=" not in playlist_url:
             return None
             
+        # Clean URL: If it's a watch URL with list param, convert to pure playlist URL
+        # This ensures yt-dlp extracts the playlist items, not just the single video context
+        if "v=" in playlist_url:
+            try:
+                import urllib.parse
+                parsed = urllib.parse.urlparse(playlist_url)
+                query = urllib.parse.parse_qs(parsed.query)
+                list_id = query.get('list', [None])[0]
+                if list_id:
+                    playlist_url = f"https://www.youtube.com/playlist?list={list_id}"
+            except Exception:
+                pass # Fallback to original URL if parsing fails
+
         opts = {
             'quiet': True,
             'no_warnings': True,
@@ -236,11 +249,20 @@ class YtDlpService:
                     if entry:
                          # Handle possibly missing keys safely
                         vid_id = entry.get('id')
+                        # Fallback: extract from URL if ID is missing
+                        if not vid_id and entry.get('url'):
+                            vid_id = self.extract_video_id(entry.get('url'))
+                            
                         if vid_id:
+                             # Get thumbnail from 'thumbnail' key or first item in 'thumbnails' list
+                             thumb = entry.get('thumbnail')
+                             if not thumb and entry.get('thumbnails'):
+                                 thumb = entry.get('thumbnails')[0].get('url')
+                             
                              items.append({
                                 "video_id": vid_id,
                                 "title": entry.get('title', 'Unknown Title'),
-                                "thumbnail": entry.get('thumbnail') or f"https://i.ytimg.com/vi/{vid_id}/hqdefault.jpg",
+                                "thumbnail": thumb or f"https://i.ytimg.com/vi/{vid_id}/hqdefault.jpg",
                                 "duration": entry.get('duration', 0)
                              })
                 

@@ -28,7 +28,7 @@ function Auth() {
             navigate('/')
         } catch (err) {
             console.error(err)
-            setError(err.response?.data?.detail || 'Authentication failed. Please try again.')
+            setError(err.response?.data?.detail || '驗證失敗，請重試。')
         } finally {
             setLoading(false)
         }
@@ -42,42 +42,42 @@ function Auth() {
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.3 }}
             >
-                <h1>{isLogin ? 'Welcome Back' : 'Create Account'}</h1>
+                <h1>{isLogin ? '歡迎回來' : '建立帳戶'}</h1>
 
                 {error && <div className="error-message">{error}</div>}
 
                 <form onSubmit={handleSubmit}>
                     <div className="form-group">
-                        <label>Username</label>
+                        <label>使用者名稱</label>
                         <input
                             type="text"
                             value={username}
                             onChange={(e) => setUsername(e.target.value)}
                             required
-                            placeholder="Enter username"
+                            placeholder="請輸入使用者名稱"
                         />
                     </div>
 
                     <div className="form-group">
-                        <label>Password</label>
+                        <label>密碼</label>
                         <input
                             type="password"
                             value={password}
                             onChange={(e) => setPassword(e.target.value)}
                             required
-                            placeholder="Enter password"
+                            placeholder="請輸入密碼"
                         />
                     </div>
 
                     <button type="submit" className="auth-button" disabled={loading}>
-                        {loading ? 'Processing...' : (isLogin ? 'Login' : 'Sign Up')}
+                        {loading ? '處理中...' : (isLogin ? '登入' : '註冊')}
                     </button>
                 </form>
 
                 <div className="auth-switch">
-                    {isLogin ? "Don't have an account? " : "Already have an account? "}
+                    {isLogin ? "還沒有帳戶？ " : "已經有帳戶？ "}
                     <button onClick={() => setIsLogin(!isLogin)} className="switch-button">
-                        {isLogin ? 'Register' : 'Login'}
+                        {isLogin ? '註冊' : '登入'}
                     </button>
                 </div>
             </motion.div>
