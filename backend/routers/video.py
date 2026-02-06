@@ -120,11 +120,20 @@ async def get_related_videos(video_id: str):
          raise HTTPException(status_code=404, detail="Video title not found")
          
     # 2. Search for videos with similar title
-    # Remove special chars or Keep it simple?
-    # Simple search is usually fine.
-    
-    # We intentionally search for slightly more to filter out self
+    # Try full title first
     results = await ytdlp_service.search(title, max_results=10)
+    
+    # If no results, try simpler query (first few words)
+    if not results:
+        # Simple tokenization: split by space and take first 5 words
+        # Also remove brackets like [], 【】 etc as they might confuse search?
+        import re
+        clean_title = re.sub(r'[\[\]【】\(\)]', '', title)
+        words = clean_title.split()
+        if len(words) > 1:
+            short_query = " ".join(words[:5])
+            print(f"Retry search with: {short_query}")
+            results = await ytdlp_service.search(short_query, max_results=10)
     
     # 3. Filter out current video and return
     filtered = [v for v in results if v['id'] != video_id]

@@ -67,9 +67,22 @@ function Navbar() {
             <div className="navbar-actions">
                 {user ? (
                     <div className="user-menu">
-                        <span className="username" onClick={() => navigate('/history')} style={{ cursor: 'pointer' }} title="觀看紀錄">🕒</span>
-                        <span className="username" onClick={() => navigate('/playlists')} style={{ cursor: 'pointer' }} title="我的播放清單">📂</span>
-                        <span className="username">{user.username}</span>
+                        <button className="nav-link-btn" onClick={() => navigate('/subscriptions')} title="訂閱內容">
+                            <span className="icon">📺</span>
+                            <span className="label">訂閱內容</span>
+                        </button>
+                        <button className="nav-link-btn" onClick={() => navigate('/history')} title="觀看紀錄">
+                            <span className="icon">🕒</span>
+                            <span className="label">觀看紀錄</span>
+                        </button>
+                        <button className="nav-link-btn" onClick={() => navigate('/playlists')} title="我的播放清單">
+                            <span className="icon">📂</span>
+                            <span className="label">播放清單</span>
+                        </button>
+
+                        <div className="user-profile">
+                            <span className="username">{user.username}</span>
+                        </div>
                         <button onClick={handleLogout} className="logout-btn">登出</button>
                     </div>
                 ) : (
@@ -81,13 +94,14 @@ function Navbar() {
 
             <style>{`
                 .auth-btn {
-                    padding: 8px 16px;
+                    padding: 8px 20px;
                     border-radius: 20px;
                     border: 1px solid rgba(255,255,255,0.2);
                     background: transparent;
                     color: white;
                     cursor: pointer;
                     font-size: 14px;
+                    font-weight: 500;
                     transition: all 0.2s;
                     white-space: nowrap;
                 }
@@ -109,18 +123,75 @@ function Navbar() {
                 .user-menu {
                     display: flex;
                     align-items: center;
-                    gap: 12px;
+                    gap: 8px;
+                }
+                
+                .nav-link-btn {
+                    display: flex;
+                    align-items: center;
+                    gap: 6px;
+                    background: transparent;
+                    border: none;
+                    color: #fff;
+                    padding: 8px 12px;
+                    border-radius: 18px;
+                    cursor: pointer;
+                    transition: background 0.2s;
+                    font-size: 0.9rem;
+                }
+                
+                .nav-link-btn:hover {
+                    background: rgba(255, 255, 255, 0.1);
+                }
+                
+                .nav-link-btn .icon {
+                    font-size: 1.1rem;
+                }
+
+                .user-profile {
+                    margin-left: 8px;
+                    margin-right: 8px;
+                    padding-left: 12px;
+                    border-left: 1px solid rgba(255,255,255,0.2);
                 }
                 
                 .username {
                     font-size: 14px;
-                    font-weight: bold;
+                    font-weight: 600;
+                }
+                
+                .logout-btn {
+                    padding: 6px 12px;
+                    background: transparent;
+                    border: 1px solid rgba(255,255,255,0.3);
+                    color: #aaa;
+                    border-radius: 4px;
+                    cursor: pointer;
+                    font-size: 0.8rem;
+                    transition: all 0.2s;
+                }
+                
+                .logout-btn:hover {
+                    color: #fff;
+                    border-color: #fff;
                 }
                 
                 /* Make sure actions don't shrink */
                 .navbar-actions {
                     flex-shrink: 0;
-                    margin-left: 8px;
+                    margin-left: 16px;
+                }
+
+                @media (max-width: 900px) {
+                    .nav-link-btn .label {
+                        display: none;
+                    }
+                    .nav-link-btn {
+                        padding: 8px;
+                    }
+                    .user-profile {
+                        display: none;
+                    }
                 }
 
                 @media (max-width: 600px) {

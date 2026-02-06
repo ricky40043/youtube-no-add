@@ -250,6 +250,7 @@ input {
   line-height: 1.4;
   display: -webkit-box;
   -webkit-line-clamp: 2;
+  line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
   margin-bottom: var(--spacing-xs);
@@ -271,122 +272,9 @@ input {
   margin-top: var(--spacing-xs);
 }
 
-/* Watch Page */
-.watch-page {
-  display: grid;
-  grid-template-columns: 1fr 400px;
-  gap: var(--spacing-xl);
-  max-width: 1600px;
-  margin: 0 auto;
-  padding: var(--spacing-lg);
-}
-
-.player-section {
-  display: flex;
-  flex-direction: column;
-  gap: var(--spacing-md);
-}
-
-.player-container {
-  position: relative;
-  aspect-ratio: 16 / 9;
-  background: #000;
-  border-radius: var(--radius-lg);
-  overflow: hidden;
-}
-
-.video-details {
-  padding: var(--spacing-md) 0;
-}
-
-.video-details h1 {
-  font-size: 1.25rem;
-  font-weight: 600;
-  margin-bottom: var(--spacing-md);
-}
-
-.video-actions {
-  display: flex;
-  gap: var(--spacing-md);
-  padding: var(--spacing-md) 0;
-  border-bottom: 1px solid var(--border);
-}
-
-.action-button {
-  display: flex;
-  align-items: center;
-  gap: var(--spacing-sm);
-  padding: var(--spacing-sm) var(--spacing-md);
-  background: var(--bg-tertiary);
-  border-radius: var(--radius-full);
-  font-size: 0.9rem;
-  transition: background var(--transition-fast);
-}
-
-.action-button:hover {
-  background: var(--bg-hover);
-}
-
-/* Sidebar */
-.sidebar {
-  display: flex;
-  flex-direction: column;
-  gap: var(--spacing-md);
-}
-
-.sidebar-title {
-  font-size: 1rem;
-  font-weight: 600;
-  padding-bottom: var(--spacing-sm);
-  border-bottom: 1px solid var(--border);
-}
-
-/* Loading States */
-.loading {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: var(--spacing-xl);
-}
-
-.spinner {
-  width: 40px;
-  height: 40px;
-  border: 3px solid var(--border);
-  border-top-color: var(--accent);
-  border-radius: var(--radius-full);
-  animation: spin 1s linear infinite;
-}
-
-@keyframes spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-/* Error State */
-.error-message {
-  text-align: center;
-  padding: var(--spacing-xl);
-  color: var(--text-secondary);
-}
-
-.error-message h2 {
-  color: var(--accent);
-  margin-bottom: var(--spacing-md);
-}
+/* Watch Page styles moved to Watch.jsx component */
 
 /* Responsive */
-@media (max-width: 1200px) {
-  .watch-page {
-    grid-template-columns: 1fr;
-  }
-
-  .sidebar {
-    display: none;
-  }
-}
-
 @media (max-width: 768px) {
   .navbar {
     padding: var(--spacing-sm) var(--spacing-md);
@@ -402,9 +290,5 @@ input {
 
   .video-grid {
     grid-template-columns: 1fr;
-  }
-
-  .watch-page {
-    padding: var(--spacing-sm);
   }
 }

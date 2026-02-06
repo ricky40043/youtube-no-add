@@ -66,12 +66,13 @@ class YtDlpService:
                     "title": info.get("title"),
                     "author": info.get("uploader") or info.get("channel"),
                     "author_id": info.get("channel_id"),
+                    "channel_id": info.get("channel_id"),
                     "thumbnail": info.get("thumbnail"),
                     "description": info.get("description", "")[:500],
                     "duration": info.get("duration"),
                     "view_count": info.get("view_count"),
                     "upload_date": info.get("upload_date"),
-                    "upload_date": info.get("upload_date"),
+
                     "width": info.get("width") or max((s.get("width") or 0 for s in info.get("formats", []) if s.get("height")), default=0),
                     "height": info.get("height") or max((s.get("height") or 0 for s in info.get("formats", []) if s.get("height")), default=0),
                     "streams": streams,
@@ -275,6 +276,56 @@ class YtDlpService:
         except Exception as e:
             print(f"yt-dlp playlist extraction error: {e}")
             return None
+
+
+    async def get_channel_latest_videos(self, channel_id: str, limit: int = 5) -> List[Dict[str, Any]]:
+        """Get latest videos from a channel"""
+        # Construction channel URL (videos tab)
+        # Handle if channel_id is actually a handle (@...) or ID
+        if channel_id.startswith('@'):
+            url = f"https://www.youtube.com/{channel_id}/videos"
+        else:
+            url = f"https://www.youtube.com/channel/{channel_id}/videos"
+            
+        opts = {
+            'quiet': True,
+            'no_warnings': True,
+            'extract_flat': 'in_playlist',
+            'playlistend': limit, # Limit number of items
+            'no_playlist': False 
+        }
+        
+        try:
+            loop = asyncio.get_event_loop()
+            with yt_dlp.YoutubeDL(opts) as ydl:
+                info = await loop.run_in_executor(
+                    None,
+                    partial(ydl.extract_info, url, download=False)
+                )
+                
+                if not info or 'entries' not in info:
+                    return []
+                
+                results = []
+                for entry in info['entries']:
+                    if entry:
+                        # Map to common format
+                        vid_id = entry.get('id')
+                        if vid_id:
+                            results.append({
+                                "id": vid_id,
+                                "title": entry.get('title'),
+                                "thumbnail": entry.get('thumbnail') or f"https://i.ytimg.com/vi/{vid_id}/hqdefault.jpg",
+                                "author": entry.get('uploader') or info.get('uploader') or info.get('title'),
+                                "channel_id": channel_id,
+                                "view_count": entry.get('view_count'),
+                                "duration": entry.get('duration'),
+                                "published_at": entry.get('upload_date')
+                            })
+                return results
+        except Exception as e:
+            print(f"yt-dlp channel fetch error: {e}")
+            return []
 
 
 # Singleton instance

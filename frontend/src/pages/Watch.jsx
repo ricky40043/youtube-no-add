@@ -2,8 +2,9 @@ import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useParams, useNavigate, useLocation } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import VideoPlayer from '../components/VideoPlayer'
+import VideoCard from '../components/VideoCard'
 import AddToPlaylistModal from '../components/AddToPlaylistModal'
-import { videoApi, historyApi, authApi, playlistApi } from '../services/api'
+import { videoApi, historyApi, authApi, playlistApi, subscriptionApi } from '../services/api'
 
 function Watch() {
     const { videoId } = useParams()
@@ -29,6 +30,48 @@ function Watch() {
 
     // Related videos state (for auto-play when no playlist)
     const [relatedVideos, setRelatedVideos] = useState([])
+    const [loadingRelated, setLoadingRelated] = useState(false)
+
+    // Subscription State
+    const [isSubscribed, setIsSubscribed] = useState(false)
+
+    // Check subscription status
+    useEffect(() => {
+        if (!videoInfo?.channel_id || !authApi.getCurrentUser()) {
+            setIsSubscribed(false)
+            return
+        }
+
+        subscriptionApi.checkStatus(videoInfo.channel_id)
+            .then(res => setIsSubscribed(res.is_subscribed))
+            .catch(err => console.error("Failed to check subscription:", err))
+    }, [videoInfo])
+
+    // Handle Subscribe
+    const handleSubscribe = async () => {
+        const user = authApi.getCurrentUser()
+        if (!user) {
+            navigate('/auth')
+            return
+        }
+
+        try {
+            if (isSubscribed) {
+                await subscriptionApi.unsubscribe(videoInfo.channel_id)
+                setIsSubscribed(false)
+            } else {
+                await subscriptionApi.subscribe({
+                    channel_id: videoInfo.channel_id,
+                    channel_name: videoInfo.author,
+                    channel_thumbnail: videoInfo.author_thumbnail
+                })
+                setIsSubscribed(true)
+            }
+        } catch (err) {
+            console.error(err)
+            alert('操作失敗，請稍後再試')
+        }
+    }
 
     // Fetch Playlist Data
     useEffect(() => {
@@ -108,12 +151,14 @@ function Watch() {
 
                 // Fetch related videos (background)
                 if (!playlistId) {
+                    setLoadingRelated(true)
                     videoApi.getRelated(videoId)
                         .then(related => {
                             console.log('[Watch] Related videos loaded:', related.length)
                             setRelatedVideos(related)
                         })
                         .catch(err => console.warn('[Watch] Failed to load related videos', err))
+                        .finally(() => setLoadingRelated(false))
                 }
 
                 // Record to watch history
@@ -241,50 +286,86 @@ function Watch() {
             animate={{ opacity: 1 }}
             transition={{ duration: 0.3 }}
         >
-            <div className="player-section">
-                <div
-                    className="video-container"
-                    style={{
-                        aspectRatio: videoInfo?.width && videoInfo?.height
-                            ? `${videoInfo.width} / ${videoInfo.height}`
-                            : '16 / 9'
-                    }}
-                >
-                    <VideoPlayer
-                        videoInfo={videoInfo}
-                        audioUrl={audioUrl}
-                        onEnded={handleVideoEnd}
-                    />
+            <div className="watch-container">
+                <div className="main-content">
+                    <div className="player-section">
+                        <div
+                            className="video-container"
+                            style={{
+                                aspectRatio: videoInfo?.width && videoInfo?.height
+                                    ? `${videoInfo.width} / ${videoInfo.height}`
+                                    : '16 / 9'
+                            }}
+                        >
+                            <VideoPlayer
+                                videoInfo={videoInfo}
+                                audioUrl={audioUrl}
+                                onEnded={handleVideoEnd}
+                            />
+                        </div>
+
+                        <div className="video-details">
+                            <h1>{videoInfo?.title}</h1>
+
+                            <div className="video-actions">
+                                {playlistId && (
+                                    <button
+                                        className={`action-button ${isShuffle ? 'active' : ''}`}
+                                        onClick={() => setIsShuffle(!isShuffle)}
+                                        style={{ background: isShuffle ? '#fff' : 'var(--bg-secondary)', color: isShuffle ? '#000' : 'inherit' }}
+                                    >
+                                        🔀 隨機播放
+                                    </button>
+                                )}
+                                <span className="action-button">
+                                    👁️ {formatViews(videoInfo?.view_count)}
+                                </span>
+                                <button className="action-button" onClick={() => {
+                                    navigator.clipboard.writeText(window.location.href)
+                                    alert('連結已複製!')
+                                }}>
+                                    📋 分享
+                                </button>
+                                <button className="action-button" onClick={() => setShowPlaylistModal(true)}>
+                                    ➕ 加入播放清單
+                                </button>
+                            </div>
+
+                            <div className="video-description">
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                                    <div className="author-info" style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                                        {videoInfo?.author_thumbnail && (
+                                            <img
+                                                src={videoInfo.author_thumbnail}
+                                                alt={videoInfo.author}
+                                                style={{ width: '40px', height: '40px', borderRadius: '50%' }}
+                                            />
+                                        )}
+                                        <div>
+                                            <p className="author-name" style={{ margin: 0, fontSize: '1rem' }}>
+                                                {videoInfo?.author}
+                                            </p>
+                                        </div>
+                                    </div>
+
+                                    <button
+                                        className={`subscribe-btn ${isSubscribed ? 'subscribed' : ''}`}
+                                        onClick={handleSubscribe}
+                                    >
+                                        {isSubscribed ? '已訂閱' : '訂閱'}
+                                    </button>
+                                </div>
+
+                                <p className="description-text">
+                                    {videoInfo?.description || '沒有說明'}
+                                </p>
+                            </div>
+                        </div>
+                    </div>
                 </div>
 
-                <div className="video-details">
-                    <h1>{videoInfo?.title}</h1>
-
-                    <div className="video-actions">
-                        {playlistId && (
-                            <button
-                                className={`action-button ${isShuffle ? 'active' : ''}`}
-                                onClick={() => setIsShuffle(!isShuffle)}
-                                style={{ background: isShuffle ? '#fff' : 'var(--bg-secondary)', color: isShuffle ? '#000' : 'inherit' }}
-                            >
-                                🔀 隨機播放
-                            </button>
-                        )}
-                        <span className="action-button">
-                            👁️ {formatViews(videoInfo?.view_count)}
-                        </span>
-                        <button className="action-button" onClick={() => {
-                            navigator.clipboard.writeText(window.location.href)
-                            alert('連結已複製!')
-                        }}>
-                            📋 分享
-                        </button>
-                        <button className="action-button" onClick={() => setShowPlaylistModal(true)}>
-                            ➕ 加入播放清單
-                        </button>
-                    </div>
-
-                    {playlistId && (
+                <div className="sidebar">
+                    {playlistId ? (
                         <div className="playlist-panel">
                             <h3>從播放清單播放中: {playlistTitle || '載入中...'}</h3>
                             {playlistError ? (
@@ -300,7 +381,6 @@ function Watch() {
                                 <>
                                     <div style={{ padding: '0 16px 8px', fontSize: '0.8rem', color: '#aaa' }}>
                                         {playlistItems.findIndex(i => i.video_id === videoId) + 1} / {playlistItems.length}
-                                        <span style={{ float: 'right', opacity: 0.5 }}> Debug: {playlistId?.substring(0, 5)}... </span>
                                     </div>
                                     <div className="playlist-items-scroll">
                                         {playlistItems.map((item, idx) => (
@@ -320,16 +400,32 @@ function Watch() {
                                 </>
                             )}
                         </div>
+                    ) : (
+                        <div className="related-videos">
+                            {loadingRelated ? (
+                                <div style={{ padding: '40px 20px', textAlign: 'center', color: '#aaa' }}>
+                                    <div className="loading-spinner" style={{
+                                        margin: '0 auto 12px',
+                                        width: '24px',
+                                        height: '24px',
+                                        border: '2px solid rgba(255,255,255,0.2)',
+                                        borderTopColor: '#fff',
+                                        borderRadius: '50%',
+                                        animation: 'spin 0.8s linear infinite'
+                                    }}></div>
+                                    載入相關影片...
+                                </div>
+                            ) : relatedVideos.length > 0 ? (
+                                relatedVideos.map(video => (
+                                    <VideoCard key={video.id} video={video} type="horizontal" />
+                                ))
+                            ) : (
+                                <div style={{ padding: '60px 20px', textAlign: 'center', color: '#666', fontSize: '0.9rem' }}>
+                                    無相關影片
+                                </div>
+                            )}
+                        </div>
                     )}
-
-                    <div className="video-description">
-                        <p className="author-name">
-                            {videoInfo?.author}
-                        </p>
-                        <p className="description-text">
-                            {videoInfo?.description || '沒有說明'}
-                        </p>
-                    </div>
                 </div>
             </div>
 
@@ -340,26 +436,43 @@ function Watch() {
                     overflow-x: hidden;
                 }
                 
-                .player-section {
-                    width: 100%;
-                    max-width: 100%;
+                @keyframes spin {
+                    to { transform: rotate(360deg); }
                 }
                 
+                .watch-container {
+                     display: flex;
+                     flex-wrap: wrap;
+                     gap: 24px;
+                     padding: 24px;
+                     max-width: 1600px;
+                     margin: 0 auto;
+                }
+
+                .main-content {
+                    flex: 1;
+                    min-width: 0; /* Allow shrinking */
+                }
+
+                .sidebar {
+                    width: 400px;
+                    flex-shrink: 0;
+                }
+
                 .video-container {
                     width: 100%;
-                    /* aspect-ratio set via inline style */
                     background: #000;
                     border-radius: 12px;
                     overflow: hidden;
-                    max-height: 80vh; /* Prevent vertical videos from taking too much space */
+                    max-height: 80vh;
                 }
                 
                 .video-details {
-                    padding: 16px 4px;
+                    padding: 16px 0;
                 }
                 
                 .video-details h1 {
-                    font-size: 1.1rem;
+                    font-size: 1.3rem;
                     font-weight: 600;
                     line-height: 1.4;
                     margin-bottom: 12px;
@@ -385,11 +498,11 @@ function Watch() {
                 }
 
                 .playlist-panel {
-                    margin-bottom: 16px;
                     border: 1px solid #333;
                     border-radius: 12px;
                     background: #1e1e1e;
                     overflow: hidden;
+                    margin-bottom: 16px;
                 }
 
                 .playlist-panel h3 {
@@ -400,7 +513,7 @@ function Watch() {
                 }
 
                 .playlist-items-scroll {
-                    max-height: 200px;
+                    max-height: 400px; /* Taller on side */
                     overflow-y: auto;
                 }
 
@@ -427,8 +540,8 @@ function Watch() {
                 }
 
                 .playlist-item img {
-                    width: 60px;
-                    height: 34px;
+                    width: 100px;
+                    height: 56px;
                     object-fit: cover;
                     border-radius: 4px;
                 }
@@ -464,42 +577,51 @@ function Watch() {
                     overflow-wrap: break-word;
                 }
                 
-                @media (min-width: 768px) {
-                    .video-details h1 {
-                        font-size: 1.3rem;
-                    }
-                    
-                    .video-details {
-                        padding: 16px 0;
-                    }
+                .subscribe-btn {
+                    padding: 8px 16px;
+                    border-radius: 20px;
+                    font-weight: bold;
+                    cursor: pointer;
+                    border: none;
+                    background: #fff;
+                    color: #000;
+                    margin-left: auto;
+                    font-size: 0.9rem;
+                    transition: background 0.2s;
+                }
+                .subscribe-btn:hover {
+                    background: #e6e6e6;
+                }
+                .subscribe-btn.subscribed {
+                    background: #333;
+                    color: #fff;
+                    border: 1px solid #555;
+                }
+                .subscribe-btn.subscribed:hover {
+                    background: #444;
                 }
 
-                @media (max-width: 767px) {
-                    /* Mobile-specific overrides for native app feel */
-                    .watch-page {
-                        padding: 0 !important; /* Remove global padding */
-                        margin-left: -16px !important; /* Compensate for main-content padding */
-                        width: 100vw;
-                        max-width: 100vw;
+                @media (max-width: 1000px) {
+                    .watch-container {
+                        flex-direction: column;
+                        padding: 0;
                     }
 
-                    .player-section {
-                        width: 100vw;
-                        margin: 0;
+                    .main-content {
+                        width: 100%;
                     }
 
+                    .sidebar {
+                        width: 100%;
+                        padding: 0 16px;
+                    }
+                    
                     .video-container {
-                        border-radius: 0 !important; /* No rounded corners on mobile */
-                        width: 100vw;
-                        max-height: none; /* Let aspect ratio dictate height */
+                        border-radius: 0;
                     }
-
-                    .video-details {
-                        padding: 12px 16px; /* Add padding back for text content */
-                    }
-
-                    .video-actions {
-                        padding: 0 16px 16px 16px;
+                    
+                     .video-details {
+                        padding: 12px 16px;
                     }
                 }
             `}</style>

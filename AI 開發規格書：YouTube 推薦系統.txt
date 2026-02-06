@@ -1,0 +1,316 @@
+第三方 YouTube 推薦系統架構與實作規範技術報告
+1. 執行摘要與系統概述
+本研究報告旨在針對擁有「播放清單、訂閱、觀看紀錄」自有資料庫的第三方平台，提出一套完整的 YouTube 推薦演算法實作邏輯與開發規範。鑑於 YouTube 原生演算法的封閉性及其優化目標（主要為廣告收益與平台留存率）可能與使用者個人的特定需求（如學習效率、資訊密度掌控）存在偏差，第三方平台的價值在於構建一個「透明化」、「可解釋」且「高度客製化」的推薦引擎。
+本報告首先深入解構 Google 團隊（Covington 等人）發表的深度神經網路（DNN）推薦架構，剖析其「候選集生成（Candidate Generation）」與「排序（Ranking）」的雙塔機制。隨後，針對 2026 年 YouTube Data API v3 的技術現況，特別是 relatedToVideoId 與 activities.list (home) 等關鍵端點的棄用，提出替代的數據獲取策略。核心技術方案聚焦於建立一個「混合過濾（Hybrid Filtering）」系統，該系統結合基於內容的過濾（Content-Based Filtering, CBF）與基於協同過濾（Collaborative Filtering, CF）的特徵，利用 Jaccard 相似度計算語義關聯，並引入指數時間衰減（Exponential Time Decay）函數來模擬內容的新鮮度偏好。
+報告最終章節將轉化為具體的工程指令，提供資料庫架構設計（SQL Schema）、API 串接邏輯、分頁游標策略（Cursor-based Pagination）及演算法權重公式，旨在直接指導人工智慧（AI）工程師進行程式碼開發，實現一個具備工業級效能與精準度的第三方推薦系統。
+2. YouTube 原生推薦演算法之解構分析
+要構建一個能與 YouTube 原生體驗媲美甚至互補的推薦系統，首要任務是理解其背後的運作邏輯。根據 Covington 等人於 Google Research 發表的經典論文《Deep Neural Networks for YouTube Recommendations》1，YouTube 的推薦系統並非單一模型，而是一個由多個神經網路組成的複雜漏斗（Funnel）架構。
+2.1 雙塔架構：從海量到精準
+YouTube 面臨的核心挑戰在於「規模（Scale）」。在擁有數十億影片的語料庫（Corpus）中，即時為使用者計算每一部影片的評分在算力上是不可行的。因此，系統被設計為兩個主要階段：候選集生成（Candidate Generation）與排序（Ranking）。
+2.1.1 第一階段：候選集生成（Candidate Generation）
+此階段的目標是「高召回率（High Recall）」。系統需要從數十億的影片中篩選出數百部（例如 500 部）與使用者「廣義相關」的影片 2。
+分類問題的定義： 模型將推薦問題視為一個超大規模的多類別分類問題（Extreme Multiclass Classification）。其數學目標是預測在時間 ，使用者  在上下文  下觀看影片  的機率：
+
+其中  是影片  的嵌入向量（Embedding）， 是使用者的嵌入向量。
+特徵輸入： 模型的輸入包括使用者的觀看歷史（Watch History）、搜尋歷史（Search History）以及人口統計學特徵（如地理位置、性別、登入設備）。
+近似最近鄰搜索（ANN）： 為了加速檢索，YouTube 使用近似最近鄰搜索演算法。使用者的歷史行為被映射為一個高維向量，系統在向量空間中尋找與該使用者向量最接近的影片向量群 4。
+協同過濾的本質： 此階段本質上是一種非線性的廣義協同過濾。它不依賴於影片的具體內容（如像素或音頻分析），而是依賴於「群體行為」——即類似的使用者看了什麼。
+2.1.2 第二階段：排序（Ranking）
+此階段的目標是「高精確度（High Precision）」。系統接收來自候選集生成的數百部影片，並對其進行精細評分，決定最終在使用者介面上呈現的順序 1。
+目標函數的轉變： 與傳統廣告系統優化點擊率（CTR）不同，YouTube 的排序網路優化的是預期觀看時間（Expected Watch Time）。這是為了防止「點擊誘餌（Clickbait）」——即標題聳動但內容空洞導致使用者快速跳出的影片。
+特徵工程的細緻化： 排序模型使用更豐富的特徵，包括：
+上下文特徵： 當前的時間、星期幾、網路連線狀態。
+互動特徵： 使用者過去是否觀看過該頻道的影片？上次觀看是什麼時候？
+印象數據（Impression Data）： 該影片是否曾經推薦給使用者但未被點擊？（這是一個強烈的負面訊號）4。
+加權邏輯回歸： 模型通常使用加權邏輯回歸（Weighted Logistic Regression），其中正樣本（被觀看的影片）的權重是其觀看時長。這樣，模型的輸出分數就直接對應於預期的觀看分鐘數。
+2.2 新鮮度（Freshness）與時間偏差
+YouTube 演算法的一個顯著特徵是對「新鮮內容」的強烈偏好。使用者傾向於觀看最新發布的影片，即使這些影片的相關性略低於某些經典舊片。
+模型機制： 為了捕捉這種非平穩（Non-stationary）的數據分佈，YouTube 將「影片上傳後經過的時間（Time Since Upload）」作為一個顯著特徵輸入給模型。
+結果： 模型會學習到一個偏差：在其他條件相同的情況下，發布時間越短的影片得分越高。這對於新聞、科技評論或娛樂趨勢類內容尤為重要 2。
+2.3 第三方平台的模仿策略
+對於第三方平台而言，由於無法存取 YouTube 內部的全量使用者行為數據（即無法訓練全網級別的協同過濾模型），我們必須採取**「基於內容的混合過濾」**策略。我們擁有使用者的「訂閱列表」和「觀看紀錄」，這足以構建一個局部的、以使用者為中心的候選集生成器，並利用 API 獲取的元數據（Metadata）進行排序。
+3. 資料獲取層：API v3 技術規格與限制分析 (2025-2026)
+在規劃開發步驟前，必須明確 YouTube Data API v3 在 2026 年的可用性與限制。過去幾年間，Google 對 API 進行了多次重大調整，移除了多個便於構建第三方客戶端的功能。
+3.1 關鍵端點棄用與影響評估
+3.1.1 relatedToVideoId 的移除
+在 2023 年 8 月之前，開發者可以透過 search.list 端點並帶上 relatedToVideoId 參數，直接獲取 YouTube 原生的「相關影片」推薦列表。此功能已被正式棄用 7。
+技術影響： 第三方平台無法再「代理」YouTube 的推薦結果。我們必須自行實作推薦邏輯，無法依賴 YouTube 的黑盒輸出來填充「接下來播放」清單。
+3.1.2 activities.list (home=true) 的失效
+早期 API 允許透過 activities.list 配合 home=true 參數來獲取使用者的個人化首頁動態。此功能亦已被棄用，目前調用會返回 403 Forbidden 或 404 Not Found 10。
+技術影響： 我們無法直接讀取使用者的「首頁」。必須透過聚合使用者訂閱頻道的「上傳（Uploads）」內容來合成一個自定義的首頁動態牆（Feed）。
+3.2 配額經濟學（Quota Economy）與成本模型
+YouTube API 的默認配額為每日 10,000 單元（Units）。不同的操作消耗差異巨大，這直接決定了系統架構的設計 12。
+操作方法 (Method)
+配額消耗 (Cost)
+用途
+經濟性分析
+search.list
+100
+關鍵字搜尋、頻道搜尋
+極高昂。若用於生成 Feed，每 100 次請求即耗盡全天配額，不可作為常規資料來源。
+videos.list
+1
+獲取影片詳情（標籤、時長）
+低廉。適合用於豐富影片元數據。
+playlistItems.list
+1
+獲取頻道上傳列表
+極低廉。這是構建第三方 Feed 的核心端點。
+channels.list
+1
+獲取頻道資訊、上傳清單 ID
+低廉。主要用於初始化訂閱列表。
+
+策略結論： 為了在有限配額下運作，系統嚴禁在常規推薦流程中使用 search.list。所有的內容發現必須基於 playlistItems.list（遍歷訂閱頻道的上傳清單）或 videos.list（針對特定影片 ID 的查詢）。
+3.3 資料獲取策略：上傳清單聚合（The Uploads Playlist Strategy）
+由於無法直接查詢「某頻道的所有影片」，最高效的方法是利用每個頻道隱藏的「上傳清單」14。
+獲取上傳清單 ID： 調用 channels.list，請求 contentDetails 部分。回應中的 contentDetails.relatedPlaylists.uploads 欄位即為該頻道所有上傳影片的播放清單 ID（通常將頻道 ID 的 UC 前綴改為 UU 即可，但透過 API 獲取更穩健）。
+輪詢上傳清單： 使用 playlistItems.list 查詢該 ID，即可按時間倒序獲得該頻道的最新影片。此操作僅消耗 1 單位配額。
+4. 資料庫架構與 Schema 設計規範
+為了支援高效的推薦運算，第三方平台必須建立一個本地資料庫來快取（Cache）影片數據並存儲使用者的行為。本節提供基於關聯式資料庫（如 PostgreSQL）的 Schema 設計。
+4.1 核心實體關聯圖 (ERD) 規劃
+4.1.1 channels 表：訂閱源管理
+此表存儲使用者訂閱的所有頻道資訊，作為候選集生成的基礎來源。
+欄位名稱
+數據類型
+說明
+索引策略
+channel_id
+VARCHAR(24)
+主鍵，YouTube Channel ID (e.g., UC...)
+PK
+title
+VARCHAR(255)
+頻道名稱
+
+
+uploads_playlist_id
+VARCHAR(24)
+該頻道的上傳清單 ID (e.g., UU...)
+
+
+last_fetched_at
+TIMESTAMP
+上次同步數據的時間
+用於排程爬蟲
+thumbnail_url
+TEXT
+頻道頭像
+
+
+
+4.1.2 videos 表：影片元數據倉庫
+此表快取從 API 獲取的影片資訊，避免重複調用 API 浪費配額。
+欄位名稱
+數據類型
+說明
+索引策略
+video_id
+VARCHAR(11)
+主鍵，YouTube Video ID
+PK
+channel_id
+VARCHAR(24)
+外鍵，關聯 channels
+FK, Index
+title
+TEXT
+影片標題
+GIN (全文檢索用)
+description
+TEXT
+影片描述
+
+
+tags
+JSONB
+標籤陣列 (e.g., ["Python", "AI"])
+GIN Index (關鍵)
+category_id
+VARCHAR(5)
+YouTube 類別 ID (e.g., 28=Tech)
+Index
+published_at
+TIMESTAMP
+發布時間，用於新鮮度計算
+B-Tree Index (排序用)
+duration_sec
+INTEGER
+影片時長（秒）
+
+
+
+4.1.3 watch_history 表：隱式回饋記錄
+此表記錄使用者對影片的具體互動，是計算「使用者興趣向量」的核心。
+欄位名稱
+數據類型
+說明
+索引策略
+id
+SERIAL
+自增主鍵
+PK
+user_id
+INTEGER
+使用者 ID
+Index
+video_id
+VARCHAR(11)
+外鍵，關聯 videos
+FK
+watched_at
+TIMESTAMP
+觀看時間
+Index (用於時間衰減)
+duration_watched
+INTEGER
+實際觀看秒數
+
+
+completion_rate
+FLOAT
+完播率 (0.0 - 1.0)
+用於加權
+interaction_type
+VARCHAR
+'view', 'like', 'skip'
+
+
+
+4.1.4 user_tag_affinity 表：使用者興趣畫像 (Computed)
+這是一個衍生表（或 Materialized View），定期計算使用者對特定標籤的偏好程度。
+欄位名稱
+數據類型
+說明
+user_id
+INTEGER
+使用者 ID
+tag
+VARCHAR(255)
+標籤名稱
+score
+FLOAT
+興趣分數 (基於完播率與頻率加權)
+last_updated
+TIMESTAMP
+上次計算時間
+
+4.2 隱式回饋（Implicit Feedback）的計算邏輯
+在缺乏明確「評分（1-5星）」的情況下，系統必須依賴隱式訊號 4。
+正向訊號： completion_rate > 0.6（完播率超過 60%）、interaction_type = 'like'。
+負向訊號： completion_rate < 0.1（點擊後 10% 內跳出）、interaction_type = 'dislike'。
+權重公式：
+
+例如，基礎觀看為 1 分，完播則為 2 分。
+5. 第三方推薦引擎核心邏輯：混合過濾實作
+本節詳細規劃如何結合上述資料庫與演算法理論，實作一個具體的推薦評分函數。我們將採用加權混合過濾（Weighted Hybrid Filtering），結合內容相關性、新鮮度與頻道親密度 16。
+5.1 評分公式總覽
+對於每一部候選影片 ，其推薦分數  定義為：
+
+其中：
+：語義相關性分數（Semantic Relevance），基於標籤。
+：新鮮度分數（Freshness Score），基於時間衰減。
+：頻道親密度（Channel Affinity），基於過往互動。
+：可調整的權重參數（例如 ），使用者可透過 UI 滑桿動態調整，實現「透明化推薦」。
+5.2 語義相關性 ：Jaccard 相似度
+利用 videos.tags 與使用者的 user_tag_affinity 進行比對。由於我們處理的是標籤集合，Jaccard 相似度係數是最適合的度量標準 18。
+數學定義：
+
+其中  是影片  的標籤集合， 是使用者興趣畫像中分數最高的前  個標籤集合（例如 Top 50）。
+實作優化：
+若直接計算集合交集運算量較大，可改用加權重疊法：
+
+即：影片標籤中，使用者感興趣的標籤權重總和，除以影片標籤總數。
+5.3 新鮮度分數 ：指數衰減函數
+為了模擬 YouTube 對新內容的偏好，使用指數衰減函數（Exponential Decay Function）19。
+數學定義：
+
+其中：
+ 是影片發布至今的小時數（NOW() - published_at）。
+ 是衰減常數，由「半衰期（Half-Life）」決定。
+若設定半衰期為  小時（即  小時後分數減半），則 。
+參數建議：
+建議設定 （2天），這意味著一部 2 天前的影片，其新鮮度分數將是剛發布時的 0.5 倍。這能確保 Feed 流不會被一個月前的舊影片佔據，但也保留了極高相關性舊影片的出現機會。
+5.4 頻道親密度 
+
+此項指標獎勵那些使用者「經常觀看」且「深度觀看」的頻道，懲罰那些「訂閱了但不看」的殭屍訂閱。
+6. Feed 聚合與分頁策略：統一游標 (Unified Cursor)
+當系統從 100 個不同的頻道聚合內容時，如何實現高效的「無限捲動（Infinite Scroll）」是一個巨大的技術挑戰。傳統的 OFFSET 分頁在數據量大時效能極差，且在動態 Feed 中會導致數據重複或遺漏 22。
+6.1 游標分頁法（Cursor-based Pagination）設計
+我們不使用頁碼（Page 1, 2），而是使用游標（Cursor）。由於推薦 Feed 是基於計算出的 Final_Score 排序的，游標必須包含分數與唯一 ID 以處理分數相同的情況。
+游標結構： base64(timestamp_score_videoid)
+查詢邏輯（SQL）：
+假設我們要獲取下一頁數據，且上一頁最後一部影片的分數為 ，發布時間為 ，ID 為 。
+
+SQL
+
+
+SELECT * FROM (
+    SELECT video_id, title, published_at,
+           (alpha * relevance + beta * freshness + gamma * affinity) as final_score
+    FROM candidates
+) AS ranked
+WHERE (final_score < S_last) 
+   OR (final_score = S_last AND published_at < T_last)
+ORDER BY final_score DESC, published_at DESC
+LIMIT 20;
+
+
+此查詢利用索引掃描，效能為 ，遠優於 OFFSET 的 。
+6.2 異質來源合併（Merge Sort Strategy）
+由於資料來源可能來自不同的 API 回應或緩存，應用層需要實作一個 K路合併排序（K-way Merge Sort） 24。
+從資料庫獲取基於訂閱的候選影片。
+（可選）從「相關推薦」隊列中獲取少量探索性影片。
+在記憶體中計算所有候選者的 Final_Score。
+排序後取 Top N 返回給前端，並生成新的 Cursor。
+7. 具體開發步驟與 AI 指令規範
+本節將上述分析轉化為可直接輸入給 AI 程式碼生成工具（如 GitHub Copilot, ChatGPT）的具體指令（Prompts）。
+7.1 階段一：資料攝取與同步模組 (Python)
+AI 指令 (Prompt Specification):
+Role: Python Backend Developer
+Task: 撰寫一個 YouTube 資料同步腳本。
+Context: 使用 google-api-python-client 庫。資料庫為 PostgreSQL。需嚴格遵守每日 10,000 單元的配額限制。
+Requirements:
+定義函數 sync_channel_uploads(channel_id)：
+輸入：頻道 ID。
+邏輯：查詢資料庫獲取該頻道的 uploads_playlist_id。調用 playlistItems.list 獲取最新的 20 部影片。
+關鍵優化： 實作 If-None-Match HTTP 標頭機制，若 YouTube 返回 304 Not Modified 則跳過處理以節省配額。
+寫入：將影片資訊（ID, 標題, 發布時間）存入 videos 表。若影片已存在則更新。
+定義函數 fetch_video_details_batch(video_ids)：
+邏輯：playlistItems 的 snippet 通常不包含完整的 tags。需將新發現的 video_ids 每 50 個一組，調用 videos.list (part='snippet,contentDetails,statistics')。
+寫入：更新 videos 表的 tags, duration, view_count 欄位。
+配額控制：此函數僅針對「發布時間在 7 天內」的影片執行，避免浪費配額在舊影片上。
+7.2 階段二：使用者畫像與評分引擎 (SQL + Python)
+AI 指令 (Prompt Specification):
+Role: Data Engineer / Algorithm Engineer
+Task: 實作推薦評分邏輯。
+Requirements:
+使用者畫像生成： 撰寫 SQL 視圖或函數 refresh_user_tag_weights(user_id)。
+邏輯：選取 watch_history 中 completion_rate > 0.5 的影片。展開這些影片的 tags (JSONB array)。計算每個標籤出現的頻率，並乘上完播率作為權重。返回權重最高的 Top 100 標籤。
+評分演算法實作： 撰寫 Python 類別 RecommendationScorer。
+方法 calculate_score(video, user_profile, weights)。
+Jaccard 實作： 計算影片標籤與使用者 Top 100 標籤的交集大小除以聯集大小。
+時間衰減實作： math.exp(-0.0144 * hours_since_publish)。
+總分計算： weights['alpha'] * jaccard + weights['beta'] * decay。
+7.3 階段三：API 服務與分頁 (FastAPI/Node.js)
+AI 指令 (Prompt Specification):
+Role: API Developer
+Task: 構建推薦 Feed API。
+Requirements:
+端點：GET /api/v1/feed?cursor=...&limit=20
+候選集檢索： 從 videos 表中選取該使用者訂閱頻道的影片（限制過去 30 天內發布）。
+即時評分： 將檢索到的影片傳入 RecommendationScorer 進行評分。
+排序與切片： 根據分數降序排列。
+游標處理：
+若無 cursor，返回 Top 20。
+若有 cursor (解碼為 last_score, last_id)，過濾掉分數高於 last_score 的項目，從中取 Top 20。
+回應格式： 返回 JSON，包含影片列表與 next_cursor。
+8. 結論與未來展望
+本報告提出了一種繞過 YouTube API 限制、構建自主推薦系統的完整技術路徑。透過將「候選集生成」從伺服器端（依賴 search.list）轉移到客戶端資料庫（依賴 subscriptions + playlistItems），我們不僅解決了配額瓶頸，更將推薦演算法的控制權交還給使用者。
+此架構的核心價值在於其透明性與可調性。使用者不再是被動接收黑箱演算法的餵食，而是可以透過調整 （相關性）與 （新鮮度）參數，主動決定他們想要探索新知還是追蹤時事。這種「Glass Box（玻璃箱）」推薦系統代表了下一代內容聚合平台的發展方向，既利用了 YouTube 龐大的內容生態，又規避了其演算法對使用者注意力的過度掠奪。
+8.1 開發檢核清單 (Checklist)
+為了確保專案順利執行，開發團隊應遵循以下檢核點：
+[ ] Schema 驗證： 確認 videos 表的 tags 欄位設為 JSONB 並建立 GIN 索引。
+[ ] 配額監控： 實作 API 請求計數器，當接近 10,000 單位時自動降級同步頻率。
+[ ] 冷啟動處理： 確認當使用者無觀看紀錄時，系統能自動降級為純時間排序（Reverse Chronological）。
+[ ] 隱私合規： 確保 watch_history 的存儲符合當地資料隱私法規（如 GDPR），並提供使用者「一鍵清除紀錄」功能。

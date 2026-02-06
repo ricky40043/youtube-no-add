@@ -311,6 +311,32 @@ function VideoPlayer({ videoInfo, audioUrl, onEnded }) {
         }
     }
 
+    // Keyboard Shortcuts
+    useEffect(() => {
+        const handleKeyDown = (e) => {
+            // Ignore if typing in an input
+            if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return
+
+            if (e.code === 'ArrowRight') {
+                e.preventDefault()
+                handleSeekForward(5)
+                setFeedback({ show: true, text: '5秒', icon: '⏩' })
+                setTimeout(() => setFeedback({ show: false, text: '', icon: null }), 600)
+            } else if (e.code === 'ArrowLeft') {
+                e.preventDefault()
+                handleSeekBackward(5)
+                setFeedback({ show: true, text: '5秒', icon: '⏪' })
+                setTimeout(() => setFeedback({ show: false, text: '', icon: null }), 600)
+            } else if (e.code === 'Space') {
+                e.preventDefault()
+                handleVideoClick()
+            }
+        }
+
+        window.addEventListener('keydown', handleKeyDown)
+        return () => window.removeEventListener('keydown', handleKeyDown)
+    }, [handleSeekForward, handleSeekBackward, handleVideoClick])
+
     return (
         <div className="player-container">
             {useAudioOnly ? (

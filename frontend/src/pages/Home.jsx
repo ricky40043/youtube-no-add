@@ -1,17 +1,30 @@
 import { useState, useEffect } from 'react'
 import { motion } from 'framer-motion'
 import VideoCard from '../components/VideoCard'
-import { searchApi } from '../services/api'
+import { searchApi, subscriptionApi, authApi } from '../services/api'
 
 function Home() {
     const [videos, setVideos] = useState([])
+    const [subFeed, setSubFeed] = useState([])
     const [loading, setLoading] = useState(true)
     const [error, setError] = useState(null)
+    const [user] = useState(authApi.getCurrentUser())
 
     useEffect(() => {
         const fetchTrending = async () => {
             try {
                 setLoading(true)
+
+                // Fetch subscription feed if logged in
+                if (user) {
+                    subscriptionApi.getFeed()
+                        .then(feed => {
+                            console.log('Feed loaded:', feed.length)
+                            setSubFeed(feed)
+                        })
+                        .catch(err => console.error('Failed to load feed:', err))
+                }
+
                 const results = await searchApi.getTrending('TW')
                 setVideos(results)
             } catch (err) {
@@ -31,7 +44,7 @@ function Home() {
         }
 
         fetchTrending()
-    }, [])
+    }, [user])
 
     if (loading) {
         return (
@@ -56,6 +69,23 @@ function Home() {
             animate={{ opacity: 1 }}
             transition={{ duration: 0.3 }}
         >
+            <div className="subscription-feed-section" style={{ marginBottom: '40px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
+                    <h1 style={{ margin: 0, fontSize: '1.5rem', color: 'var(--accent-color)' }}>
+                        📰 來自您的訂閱
+                    </h1>
+                    <a href="/subscriptions" style={{ color: '#aaa', textDecoration: 'none', fontSize: '0.9rem' }}>
+                        管理訂閱 &rarr;
+                    </a>
+                </div>
+                <div className="video-grid">
+                    {subFeed.map((video, index) => (
+                        <VideoCard key={`sub-${video.id}-${index}`} video={video} />
+                    ))}
+                </div>
+            </div>
+
+
             <h1 style={{ marginBottom: '24px', fontSize: '1.5rem' }}>
                 🔥 熱門影片
             </h1>

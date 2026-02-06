@@ -72,3 +72,29 @@ async def login(user: UserLogin, db: AsyncSession = Depends(get_db)):
         "user_id": db_user.id,
         "username": db_user.username
     }
+
+from fastapi.security import OAuth2PasswordBearer
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
+
+async def get_current_user(token: str = Depends(oauth2_scheme), db: AsyncSession = Depends(get_db)):
+    # Simple mock validation
+    if not token.startswith("mock-token-"):
+         raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid authentication credentials",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    
+    try:
+        user_id = int(token.replace("mock-token-", ""))
+        result = await db.execute(select(User).filter(User.id == user_id))
+        user = result.scalars().first()
+        if user is None:
+            raise HTTPException(status_code=404, detail="User not found")
+        return user
+    except ValueError:
+         raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid token format",
+            headers={"WWW-Authenticate": "Bearer"},
+        )

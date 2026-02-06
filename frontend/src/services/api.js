@@ -108,6 +108,32 @@ export const playlistApi = {
     }
 }
 
+
+
+export const subscriptionApi = {
+    getAll: async () => {
+        const response = await api.get('/api/subscriptions/')
+        return response.data
+    },
+    checkStatus: async (channelId) => {
+        const response = await api.get(`/api/subscriptions/status/${encodeURIComponent(channelId)}`)
+        return response.data
+    },
+    subscribe: async (data) => {
+        // data: { channel_id, channel_name, channel_thumbnail }
+        const response = await api.post('/api/subscriptions/', data)
+        return response.data
+    },
+    unsubscribe: async (channelId) => {
+        const response = await api.delete(`/api/subscriptions/${encodeURIComponent(channelId)}`)
+        return response.data
+    },
+    getFeed: async () => {
+        const response = await api.get('/api/subscriptions/feed')
+        return response.data
+    }
+}
+
 // Auth API for User System
 export const authApi = {
     login: async (username, password) => {

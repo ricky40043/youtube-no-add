@@ -13,6 +13,7 @@ class User(Base):
     
     playlists = relationship("Playlist", back_populates="owner")
     history = relationship("WatchHistory", back_populates="user")
+    subscriptions = relationship("Subscription", back_populates="user")
 
 class Playlist(Base):
     __tablename__ = "playlists"
@@ -57,3 +58,15 @@ class WatchHistory(Base):
     progress_seconds = Column(Integer, default=0)
     
     user = relationship("User", back_populates="history")
+
+class Subscription(Base):
+    __tablename__ = "subscriptions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"))
+    channel_id = Column(String, index=True)
+    channel_name = Column(String)
+    channel_thumbnail = Column(String, nullable=True)
+    subscribed_at = Column(DateTime, default=datetime.utcnow)
+
+    user = relationship("User", back_populates="subscriptions")
