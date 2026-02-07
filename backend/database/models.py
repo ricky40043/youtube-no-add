@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, ForeignKey, DateTime, Boolean, Text
+from sqlalchemy import Column, Integer, String, ForeignKey, DateTime, Boolean, Text, Float, JSON
 from sqlalchemy.orm import relationship
 from datetime import datetime
 from .connection import Base
@@ -56,6 +56,9 @@ class WatchHistory(Base):
     video_duration = Column(Integer, nullable=True)
     watched_at = Column(DateTime, default=datetime.utcnow)
     progress_seconds = Column(Integer, default=0)
+    duration_watched = Column(Integer, default=0)
+    completion_rate = Column(Float, default=0.0)
+    interaction_type = Column(String, default='view')
     
     user = relationship("User", back_populates="history")
 
@@ -70,3 +73,33 @@ class Subscription(Base):
     subscribed_at = Column(DateTime, default=datetime.utcnow)
 
     user = relationship("User", back_populates="subscriptions")
+
+class Channel(Base):
+    __tablename__ = "channels"
+
+    id = Column(String, primary_key=True, index=True)
+    title = Column(String)
+    thumbnail_url = Column(String)
+    uploads_playlist_id = Column(String)
+    last_fetched_at = Column(DateTime, nullable=True)
+
+class Video(Base):
+    __tablename__ = "videos"
+
+    id = Column(String, primary_key=True, index=True)
+    channel_id = Column(String, index=True) 
+    title = Column(String)
+    description = Column(Text)
+    tags = Column(JSON)
+    category_id = Column(String)
+    published_at = Column(DateTime, index=True)
+    duration = Column(Integer)
+    view_count = Column(Integer)
+
+class UserTagAffinity(Base):
+    __tablename__ = "user_tag_affinity"
+
+    user_id = Column(Integer, ForeignKey("users.id"), primary_key=True)
+    tag = Column(String, primary_key=True)
+    score = Column(Float)
+    last_updated = Column(DateTime, default=datetime.utcnow)

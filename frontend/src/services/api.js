@@ -42,9 +42,9 @@ export const videoApi = {
 
 export const searchApi = {
     // Search videos
-    search: async (query, maxResults = 20) => {
+    search: async (query, maxResults = 20, offset = 0) => {
         const response = await api.get('/api/search', {
-            params: { q: query, max_results: maxResults }
+            params: { q: query, max_results: maxResults, offset }
         })
         return response.data.results
     },
@@ -130,6 +130,22 @@ export const subscriptionApi = {
     },
     getFeed: async () => {
         const response = await api.get('/api/subscriptions/feed')
+        return response.data
+    }
+}
+
+// Feed / Recommendation API
+export const feedApi = {
+    getFeed: async (cursor, limit = 50) => {
+        const response = await api.get('/api/feed/', { params: { cursor, limit } })
+        return response.data
+    },
+    sync: async () => {
+        const response = await api.post('/api/feed/sync')
+        return response.data
+    },
+    refreshProfile: async () => {
+        const response = await api.post('/api/feed/refresh-profile')
         return response.data
     }
 }

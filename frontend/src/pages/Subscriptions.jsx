@@ -3,10 +3,17 @@ import { useNavigate } from 'react-router-dom'
 import { subscriptionApi, authApi } from '../services/api'
 import { motion } from 'framer-motion'
 
+import ConfirmModal from '../components/ConfirmModal'
+
 function Subscriptions() {
     const [subscriptions, setSubscriptions] = useState([])
     const [loading, setLoading] = useState(true)
     const [error, setError] = useState(null)
+
+    // Modal State
+    const [showUnsubscribeModal, setShowUnsubscribeModal] = useState(false)
+    const [selectedChannelId, setSelectedChannelId] = useState(null)
+
     const navigate = useNavigate()
     const user = authApi.getCurrentUser()
 
@@ -32,12 +39,26 @@ function Subscriptions() {
         fetchSubscriptions()
     }, [user?.id, navigate])
 
-    // Handle Unsubscribe
-    const handleUnsubscribe = async (channelId) => {
-        if (!window.confirm('確定要取消訂閱此頻道嗎？')) return
+    // Handle Unsubscribe Click
+    const handleUnsubscribeClick = (e, channelId) => {
+        e.stopPropagation() // Prevent bubbling
+        setSelectedChannelId(channelId)
+        setShowUnsubscribeModal(true)
+    }
+
+    // Confirm Unsubscribe Action
+    const confirmUnsubscribe = async () => {
+        if (!selectedChannelId) return
+
         try {
-            await subscriptionApi.unsubscribe(channelId)
-            setSubscriptions(subscriptions.filter(sub => sub.channel_id !== channelId))
+            await subscriptionApi.unsubscribe(selectedChannelId)
+            setSubscriptions(subscriptions.filter(sub => sub.channel_id !== selectedChannelId))
+            // Only close modal after success is handled by ConfirmModal's onConfirm execution order
+            // But ConfirmModal closes itself in the updated logic? 
+            // Better to handle close here or let modal handle it.
+            // My ConfirmModal calls onConfirm then onClose. Ideally onConfirm is async?
+            // "onConfirm(); onClose();" in ConfirmModal synchronous. 
+            // Async actions here are fine, modal closes immediately which feels snappy.
         } catch (err) {
             console.error(err)
             alert('取消訂閱失敗')
@@ -63,7 +84,7 @@ function Subscriptions() {
             ) : (
                 <div className="subscriptions-grid">
                     {subscriptions.map(sub => (
-                        <div key={sub.id} className="subscription-card">
+                        <div key={sub.id} className="subscription-card" onClick={() => navigate(`/watch/${sub.latest_video_id || ''}`)}>
                             <div className="channel-info">
                                 {sub.channel_thumbnail && (
                                     <img src={sub.channel_thumbnail} alt={sub.channel_name} className="channel-thumb" />
@@ -75,7 +96,7 @@ function Subscriptions() {
                             </div>
                             <button
                                 className="unsubscribe-btn"
-                                onClick={() => handleUnsubscribe(sub.channel_id)}
+                                onClick={(e) => handleUnsubscribeClick(e, sub.channel_id)}
                             >
                                 取消訂閱
                             </button>
@@ -83,6 +104,15 @@ function Subscriptions() {
                     ))}
                 </div>
             )}
+
+            <ConfirmModal
+                isOpen={showUnsubscribeModal}
+                onClose={() => setShowUnsubscribeModal(false)}
+                onConfirm={confirmUnsubscribe}
+                title="取消訂閱"
+                message="確定要取消訂閱此頻道嗎？這項操作無法復原。"
+                confirmText="確認取消"
+            />
 
             <style>{`
                 .subscriptions-page {
@@ -105,6 +135,7 @@ function Subscriptions() {
                     gap: 12px;
                     border: 1px solid transparent;
                     transition: border-color 0.2s;
+                    cursor: pointer;
                 }
                 .subscription-card:hover {
                     border-color: var(--accent-color);
@@ -142,6 +173,7 @@ function Subscriptions() {
                     cursor: pointer;
                     font-size: 0.85rem;
                     white-space: nowrap;
+                    z-index: 2; /* Ensure button is above card click */
                 }
                 .unsubscribe-btn:hover {
                     background: rgba(255, 50, 50, 0.2);

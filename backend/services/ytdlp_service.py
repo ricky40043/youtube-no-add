@@ -3,12 +3,16 @@ import asyncio
 from functools import partial
 from typing import Optional, Dict, Any, List
 import re
-
+import os
+import uuid
+from config import get_settings
+from services.cache_service import cache_service
 
 class YtDlpService:
     """yt-dlp wrapper service for extracting video information and stream URLs"""
     
     def __init__(self):
+        self.settings = get_settings()
         self.ydl_opts = {
             'quiet': True,
             'no_warnings': True,
@@ -30,7 +34,7 @@ class YtDlpService:
             if match:
                 return match.group(1)
         return url_or_id
-    
+
     async def get_video_info(self, video_id: str) -> Optional[Dict[str, Any]]:
         """Get video metadata"""
         video_id = self.extract_video_id(video_id)
@@ -47,6 +51,10 @@ class YtDlpService:
             'listformats': False,
         }
         
+        # Use cookies if available to unlock 1080p/Premium
+        if self.settings.ytdlp_cookies_file and os.path.exists(self.settings.ytdlp_cookies_file):
+            opts['cookiefile'] = self.settings.ytdlp_cookies_file
+        
         try:
             loop = asyncio.get_event_loop()
             with yt_dlp.YoutubeDL(opts) as ydl:
@@ -59,7 +67,7 @@ class YtDlpService:
                     return None
                 
                 # Extract streams
-                streams = self._extract_streams(info)
+                streams = await self._extract_streams(info)
                 
                 return {
                     "id": info.get("id"),
@@ -72,6 +80,11 @@ class YtDlpService:
                     "duration": info.get("duration"),
                     "view_count": info.get("view_count"),
                     "upload_date": info.get("upload_date"),
+                    "upload_date": info.get("upload_date"),
+                    "published_at": self._format_date(info.get("upload_date") or info.get("release_date")),
+                    "tags": info.get("tags", []),
+                    "categories": info.get("categories", []),
+                    "subtitles": self._extract_subtitles(info),
 
                     "width": info.get("width") or max((s.get("width") or 0 for s in info.get("formats", []) if s.get("height")), default=0),
                     "height": info.get("height") or max((s.get("height") or 0 for s in info.get("formats", []) if s.get("height")), default=0),
@@ -81,7 +94,7 @@ class YtDlpService:
             print(f"yt-dlp error: {e}")
             return None
     
-    def _extract_streams(self, info: Dict[str, Any]) -> List[Dict[str, Any]]:
+    async def _extract_streams(self, info: Dict[str, Any]) -> List[Dict[str, Any]]:
         """Extract available streams from video info"""
         streams = []
         formats = info.get("formats", [])
@@ -89,6 +102,8 @@ class YtDlpService:
         # Separate by type
         combined_formats = {}  # Video with audio
         audio_formats = []
+        
+        print(f"[DEBUG] Processing {len(formats)} formats for streams...")
         
         for fmt in formats:
             # Skip storyboards and similar
@@ -126,22 +141,99 @@ class YtDlpService:
                         "filesize": fmt.get("filesize"),
                         "tbr": fmt.get("tbr"),
                     }
+            
+            # Video-only stream (High Quality DASH) - Capture for Proxy Merging
+            elif vcodec != "none" and acodec == "none":
+                height = fmt.get("height", 0)
+                # Only care about HD+ or if combined is missing
+                if height >= 720:  # 720p, 1080p, 4K
+                    quality = f"{height}p"
+                    # Add as potential proxy target
+                    # We store it in a separate list to process after finding best audio
+                    if 'video_only' not in combined_formats: combined_formats['video_only'] = []
+                    combined_formats['video_only'].append({
+                        "height": height,
+                        "url": url,
+                        "format": fmt.get("ext", "mp4"),
+                        "quality": quality,
+                        "fps": fmt.get("fps", 30)
+                    })
         
-        # Add combined formats sorted by quality (prefer these for mobile playback)
+        # Find best audio first
+        best_audio_url = None
+        if audio_formats:
+            best_audio = max(audio_formats, key=lambda x: x.get("quality", 0))
+            best_audio_url = best_audio["url"]
+            streams.append(best_audio)
+            print(f"[DEBUG] Found best audio: {best_audio.get('quality')} (URL len: {len(best_audio_url)})")
+        else:
+            print("[DEBUG] No AUDIO formats found!")
+
+        # Process Video Only (Create Proxy Streams) - 1080p/720p Support
+        video_only = combined_formats.pop('video_only', [])
+        print(f"[DEBUG] Found {len(video_only)} video-only formats.")
+        if best_audio_url:
+            import urllib.parse
+            for v in video_only:
+                # Only add if we don't have a native combined format (or if native is bad)
+                if v['quality'] in combined_formats:
+                    print(f"[DEBUG] Skipping proxy for {v['quality']} (Native exists)")
+                    continue
+                
+                # Generate Short ID for Proxy
+                proxy_id = str(uuid.uuid4())
+                
+                # Store in Redis (TTL 1 hour)
+                # We store as dict, cache_service handles json serialization
+                await cache_service.set(f"proxy:{proxy_id}", {
+                    "v": v['url'], 
+                    "a": best_audio_url
+                }, ttl=3600)
+
+                proxy_url = f"/api/video/merge?id={proxy_id}"
+                
+                print(f"[DEBUG] Generated proxy ID: {proxy_id} for quality {v['quality']}")
+                streams.append({
+                    "type": "combined",
+                    "quality": v['quality'], # Show as normal quality (e.g. 1080p)
+                    "url": proxy_url,
+                    "format": "webm", # FFmpeg output
+                    "filesize": 0,
+                    "is_proxy": True 
+                })
+
+        # Add native combined formats
         quality_order = ["1080p", "720p", "480p", "360p", "296p", "240p", "144p"]
         for q in quality_order:
             if q in combined_formats:
                 streams.append(combined_formats[q])
+                # Remove so we don't add again
+                del combined_formats[q]
         
-        # Also add any remaining combined formats not in the standard list
+        # Add remaining combined
         for q, fmt in combined_formats.items():
-            if q not in quality_order:
-                streams.append(fmt)
+            streams.append(fmt)
+            
+        # Add HLS Manifest (Enable 1080p+ Adaptive Streaming)
+        # yt-dlp usually exposes this as 'manifest_url' (HLS) or 'manifest_url_hls'
+        hls_url = info.get('manifest_url') or info.get('manifest_url_hls')
         
-        # Add best audio format for background playback
-        if audio_formats:
-            best_audio = max(audio_formats, key=lambda x: x.get("quality", 0))
-            streams.append(best_audio)
+        # Fallback: Look for m3u8 in formats if top-level manifest is missing
+        if not hls_url and formats:
+            for fmt in formats:
+                if fmt.get('protocol') == 'm3u8' or fmt.get('protocol') == 'm3u8_native' or fmt.get('ext') == 'm3u8':
+                    hls_url = fmt.get('url')
+                    if hls_url:
+                        break
+        
+        if hls_url:
+            streams.append({
+                "type": "hls",
+                "quality": "Auto (1080p+)",  # Label for UI
+                "url": hls_url,
+                "format": "m3u8",
+                "filesize": 0
+            })
         
         return streams
     
@@ -169,44 +261,118 @@ class YtDlpService:
             print(f"yt-dlp audio stream error: {e}")
             return None
     
-    async def search(self, query: str, max_results: int = 20) -> List[Dict[str, Any]]:
-        """Search YouTube videos"""
-        search_url = f"ytsearch{max_results}:{query}"
+    async def search(self, query: str, max_results: int = 20, offset: int = 0) -> List[Dict[str, Any]]:
+        """
+        Search YouTube videos with parallel metadata fetching
+        
+        Args:
+            query: Search query
+            max_results: Number of results to return (limit)
+            offset: Number of results to skip (0-based)
+        """
+        # Calculate playlist range (1-based)
+        start = offset + 1
+        end = offset + max_results
+        
+        # We need to ask for enough results in the search query
+        # ytsearchN requests N results. To get item #40, we need ytsearch40.
+        search_query = f"ytsearch{end}:{query}"
         
         opts = {
             'quiet': True,
             'no_warnings': True,
-            'extract_flat': True,
+            'extract_flat': True, # FAST mode
+            'skip_download': True,
             'no_playlist': True,
+            'playliststart': start,
+            'playlistend': end,
         }
         
         try:
             loop = asyncio.get_event_loop()
             with yt_dlp.YoutubeDL(opts) as ydl:
+                # Use extract_info on the search query
                 info = await loop.run_in_executor(
                     None,
-                    partial(ydl.extract_info, search_url, download=False)
+                    partial(ydl.extract_info, search_query, download=False)
                 )
                 
                 if not info or 'entries' not in info:
                     return []
                 
-                results = []
-                for entry in info['entries']:
-                    if entry:
-                        results.append({
-                            "id": entry.get("id"),
-                            "title": entry.get("title"),
-                            "author": entry.get("uploader") or entry.get("channel"),
-                            "thumbnail": entry.get("thumbnail") or f"https://i.ytimg.com/vi/{entry.get('id')}/hqdefault.jpg",
-                            "duration": entry.get("duration"),
-                            "view_count": entry.get("view_count"),
-                        })
+                # entries might contain None for skipped items or errors
+                entries = [e for e in info['entries'] if e]
+                
+                # 2. Parallel fetch of details
+                tasks = []
+                for entry in entries:
+                    if entry and entry.get('id'):
+                        tasks.append(self.get_video_info(entry['id']))
+                
+                # Limit concurrency if needed
+                results_with_none = await asyncio.gather(*tasks)
+                
+                # Filter failed fetches
+                results = [r for r in results_with_none if r]
+                
+                # 3. Sort by published_at desc
+                results.sort(key=lambda x: x.get('published_at') or '', reverse=True)
                 
                 return results
         except Exception as e:
             print(f"yt-dlp search error: {e}")
             return []
+
+    def _extract_subtitles(self, info: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """Extract and format subtitles (both manual and auto)"""
+        formatted_subs = []
+        
+        # Helper to process a sub dict
+        def process_subs(subs_dict, is_auto):
+            if not subs_dict:
+                return
+            
+            for lang, formats in subs_dict.items():
+                if not formats:
+                    continue
+                
+                # Prefer vtt, then srt, then ttml
+                # yt-dlp usually gives a list of formats. We want the URL.
+                selected_fmt = None
+                for ext in ['vtt', 'srt', 'ttml']:
+                    for fmt in formats:
+                        if fmt.get('ext') == ext:
+                            selected_fmt = fmt
+                            break
+                    if selected_fmt:
+                        break
+                
+                # If no preferred format found, take the first one
+                if not selected_fmt and formats:
+                    selected_fmt = formats[0]
+                
+                if selected_fmt:
+                    formatted_subs.append({
+                        "label": f"{lang} ({'Auto' if is_auto else 'Manual'})", # Simple label for now
+                        "lang": lang,
+                        "url": selected_fmt.get('url'),
+                        "is_auto": is_auto,
+                        "ext": selected_fmt.get('ext')
+                    })
+
+        # 1. Manual Subtitles (Priority)
+        process_subs(info.get('subtitles'), False)
+        
+        # 2. Automatic Captions
+        process_subs(info.get('automatic_captions'), True)
+        
+        return formatted_subs
+
+    def _format_date(self, date_str: Optional[str]) -> Optional[str]:
+        """Convert YYYYMMDD to YYYY-MM-DD"""
+        if not date_str or len(date_str) != 8:
+            return None
+        return f"{date_str[:4]}-{date_str[4:6]}-{date_str[6:]}"
 
     async def get_playlist_info(self, playlist_url: str) -> Optional[Dict[str, Any]]:
         """Get playlist metadata and items"""
@@ -278,6 +444,38 @@ class YtDlpService:
             return None
 
 
+
+    async def get_channel_info(self, channel_id: str) -> Optional[Dict[str, Any]]:
+        """Get channel metadata (title, thumbnail) without API"""
+        url = f"https://www.youtube.com/channel/{channel_id}/about"
+        
+        opts = {
+            'quiet': True,
+            'no_warnings': True,
+            'extract_flat': True,
+            'dump_single_json': True,
+        }
+        
+        try:
+            loop = asyncio.get_event_loop()
+            with yt_dlp.YoutubeDL(opts) as ydl:
+                info = await loop.run_in_executor(
+                    None,
+                    partial(ydl.extract_info, url, download=False)
+                )
+                
+                if not info:
+                    return None
+                    
+                return {
+                    "id": channel_id,
+                    "title": info.get("uploader") or info.get("channel") or info.get("title"),
+                    "thumbnail": info.get("thumbnail") or f"https://yt3.googleusercontent.com/ytc/{channel_id}", # Fallback/Dummy if failed
+                }
+        except Exception as e:
+            print(f"yt-dlp channel info error: {e}")
+            return None
+
     async def get_channel_latest_videos(self, channel_id: str, limit: int = 5) -> List[Dict[str, Any]]:
         """Get latest videos from a channel"""
         # Construction channel URL (videos tab)
@@ -290,7 +488,8 @@ class YtDlpService:
         opts = {
             'quiet': True,
             'no_warnings': True,
-            'extract_flat': 'in_playlist',
+            'extract_flat': False, # Get full info to ensure dates are present
+            'skip_download': True,
             'playlistend': limit, # Limit number of items
             'no_playlist': False 
         }
@@ -320,7 +519,9 @@ class YtDlpService:
                                 "channel_id": channel_id,
                                 "view_count": entry.get('view_count'),
                                 "duration": entry.get('duration'),
-                                "published_at": entry.get('upload_date')
+                                "view_count": entry.get('view_count'),
+                                "duration": entry.get('duration'),
+                                "published_at": entry.get('upload_date') or entry.get('release_date')
                             })
                 return results
         except Exception as e:

@@ -13,6 +13,7 @@ function VideoPlayer({ videoInfo, audioUrl, onEnded }) {
 
     const [feedback, setFeedback] = useState({ show: false, text: '', icon: null })
     const [isFullscreen, setIsFullscreen] = useState(false)
+    const [startTimeOffset, setStartTimeOffset] = useState(0) // Track offset for proxy seeking
 
     // Gesture refs
     const lastTapTime = useRef(0)
@@ -21,22 +22,164 @@ function VideoPlayer({ videoInfo, audioUrl, onEnded }) {
     const doubleTapTimer = useRef(null)
     const isLongPressing = useRef(false)
 
-    // Find best stream URL
+    // New State for Settings & Subtitles
+    const [showSettings, setShowSettings] = useState(false)
+    const [playbackRate, setPlaybackRate] = useState(1.0)
+    const [primarySubtitle, setPrimarySubtitle] = useState(null)
+    const [secondarySubtitle, setSecondarySubtitle] = useState(null)
+    const [secondarySubtitleText, setSecondarySubtitleText] = useState('')
+    const [secondaryCues, setSecondaryCues] = useState([])
+
+    // Parse VTT for secondary subtitles
+    useEffect(() => {
+        if (!secondarySubtitle?.url) {
+            setSecondaryCues([])
+            setSecondarySubtitleText('')
+            return
+        }
+
+        // Use Proxy to avoid CORS
+        const proxyUrl = `/api/video/proxy?url=${encodeURIComponent(secondarySubtitle.url)}`
+
+        fetch(proxyUrl)
+            .then(res => res.text())
+            .then(text => {
+                // ... (VTT Parser remains same)
+                const lines = text.split('\n')
+                const cues = []
+                let currentCue = null
+
+                // Regex for timestamp: 00:00:00.000
+                const timeRegex = /(\d{2}:)?\d{2}:\d{2}\.\d{3}/
+
+                const parseTime = (t) => {
+                    const parts = t.split(':')
+                    let seconds = 0
+                    if (parts.length === 3) {
+                        seconds = parseInt(parts[0]) * 3600 + parseInt(parts[1]) * 60 + parseFloat(parts[2])
+                    } else {
+                        seconds = parseInt(parts[0]) * 60 + parseFloat(parts[1])
+                    }
+                    return seconds
+                }
+
+                for (let i = 0; i < lines.length; i++) {
+                    const line = lines[i].trim()
+                    if (!line) continue
+                    if (line.includes('-->')) {
+                        const [start, end] = line.split(' --> ')
+                        currentCue = {
+                            start: parseTime(start.trim()),
+                            end: parseTime(end.trim()),
+                            text: ''
+                        }
+                    } else if (currentCue) {
+                        // Accumulate text
+                        currentCue.text += (currentCue.text ? '\n' : '') + line
+                        // If next line is empty or timestamp, push
+                        if (i + 1 >= lines.length || lines[i + 1].includes('-->') || lines[i + 1].trim() === '') {
+                            cues.push(currentCue)
+                            currentCue = null
+                        }
+                    }
+                }
+                setSecondaryCues(cues)
+            })
+            .catch(console.error)
+    }, [secondarySubtitle])
+
+
+
+    // Update Secondary Subtitle Display
+    useEffect(() => {
+        if (secondaryCues.length === 0) return
+
+        const currentCue = secondaryCues.find(cue => currentTime >= cue.start && currentTime <= cue.end)
+        setSecondarySubtitleText(currentCue ? currentCue.text : '')
+    }, [currentTime, secondaryCues])
+
+    // Handle Speed Change
+    const handleSpeedChange = (rate) => {
+        setPlaybackRate(rate)
+        if (videoRef.current) {
+            videoRef.current.playbackRate = rate
+        }
+        setShowSettings(false)
+    }
+
+    // Quality State
+    const [quality, setQuality] = useState('auto')
+    const [availableQualities, setAvailableQualities] = useState([])
+    const shouldRestoreTime = useRef(false)
+    const savedTime = useRef(0)
+
+    // Parse streams and set default quality
+    useEffect(() => {
+        if (!videoInfo?.streams) return
+
+        // Filter for video streams (including HLS)
+        const videoStreams = videoInfo.streams.filter(s => s.type === 'combined' || s.type === 'video' || s.type === 'hls')
+
+        // Extract unique qualities
+        const qualities = [...new Set(videoStreams.map(s => s.quality))].sort((a, b) => {
+            // "Auto" or "HLS" should be first (default)
+            if (a.includes('Auto')) return -1
+            if (b.includes('Auto')) return 1
+
+            // Sort logic: 1080p > 720p > ...
+            const getVal = (q) => parseInt(q) || 0
+            return getVal(b) - getVal(a)
+        })
+
+        setAvailableQualities(qualities)
+
+        // Default to highest quality (Auto if available, else 1080p...)
+        if (qualities.length > 0) {
+            setQuality(qualities[0])
+        }
+    }, [videoInfo])
+
+    // Find stream URL based on current quality
     const getStreamUrl = useCallback(() => {
         if (!videoInfo?.streams?.length) return null
 
-        // Prefer combined video+audio format
-        const combined = videoInfo.streams.find(s => s.type === 'combined' || s.type === 'video')
-        if (combined) return combined.url
+        // If specific quality selected
+        if (quality !== 'auto') {
+            const stream = videoInfo.streams.find(s => s.quality === quality && (s.type === 'combined' || s.type === 'video' || s.type === 'hls'))
+            if (stream) return stream.url
+        }
 
-        // Fallback to first available
-        return videoInfo.streams[0]?.url
-    }, [videoInfo])
+        // Fallback or Auto logic if 'auto' string is used (backward compat)
+        // Prefer HLS
+        const hls = videoInfo.streams.find(s => s.type === 'hls')
+        if (hls) return hls.url
+
+        // Fallback: Prefer highest quality combined
+        const videoStreams = videoInfo.streams.filter(s => s.type === 'combined' || s.type === 'video')
+        videoStreams.sort((a, b) => (parseInt(b.quality) || 0) - (parseInt(a.quality) || 0))
+
+        return videoStreams[0]?.url || videoInfo.streams[0]?.url
+    }, [videoInfo, quality])
+
+    // Handle Quality Change
+    const handleQualityChange = (newQuality) => {
+        if (newQuality === quality) return
+
+        // Reset offset on quality change (simpler logic)
+        setStartTimeOffset(0)
+
+        // Save current time
+        savedTime.current = videoRef.current ? videoRef.current.currentTime : 0
+        shouldRestoreTime.current = true
+
+        setQuality(newQuality)
+        setShowSettings(false)
+    }
 
     // Media Session handlers
     const handlePlay = useCallback(() => {
         const media = useAudioOnly ? audioRef.current : videoRef.current
-        media?.play()
+        media?.play().catch(e => { if (e.name !== 'NotAllowedError') console.error(e) })
     }, [useAudioOnly])
 
     const handlePause = useCallback(() => {
@@ -78,7 +221,7 @@ function VideoPlayer({ videoInfo, audioUrl, onEnded }) {
             setUseAudioOnly(true)
             if (audioRef.current) {
                 audioRef.current.src = audioUrl
-                audioRef.current.play().catch(console.error)
+                audioRef.current.play().catch(e => { if (e.name !== 'NotAllowedError') console.error(e) })
             }
             return
         }
@@ -105,20 +248,21 @@ function VideoPlayer({ videoInfo, audioUrl, onEnded }) {
                 hls.loadSource(streamUrl)
                 hls.attachMedia(video)
                 hls.on(Hls.Events.MANIFEST_PARSED, () => {
-                    video.play().catch(console.error)
+                    video.play().catch(e => { if (e.name !== 'NotAllowedError') console.error(e) })
                 })
             } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
                 // Safari native HLS
                 if (video.src !== streamUrl) {
                     video.src = streamUrl
-                    video.play().catch(console.error)
+                    video.play().catch(e => { if (e.name !== 'NotAllowedError') console.error(e) })
                 }
             }
         } else {
             // Direct video URL
             if (video.src !== streamUrl) {
+                // If seeking (streamUrl contains &t=), don't set savedTime
                 video.src = streamUrl
-                video.play().catch(console.error)
+                video.play().catch(e => { if (e.name !== 'NotAllowedError') console.error(e) })
             }
         }
 
@@ -144,11 +288,27 @@ function VideoPlayer({ videoInfo, audioUrl, onEnded }) {
 
     // Event handlers
     const handleTimeUpdate = (e) => {
-        setCurrentTime(e.target.currentTime)
+        setCurrentTime(e.target.currentTime + startTimeOffset)
     }
 
     const handleLoadedMetadata = (e) => {
-        setDuration(e.target.duration)
+        const d = e.target.duration
+        if (Number.isFinite(d)) {
+            setDuration(d)
+        } else if (videoInfo?.duration) {
+            // Fallback to metadata duration if stream duration is Infinity (e.g. proxy)
+            setDuration(videoInfo.duration)
+        }
+
+        if (shouldRestoreTime.current) {
+            e.target.currentTime = savedTime.current
+            shouldRestoreTime.current = false
+            if (isPlaying) e.target.play().catch(e => { if (e.name !== 'NotAllowedError') console.error(e) })
+        } else if (startTimeOffset > 0) {
+            // If we just reloaded due to seek, we start at 0 (relative to new stream) which maps to startTimeOffset
+            // No need to set currentTime
+            if (isPlaying) e.target.play().catch(e => { if (e.name !== 'NotAllowedError') console.error(e) })
+        }
     }
 
     const handlePlayEvent = () => {
@@ -168,14 +328,32 @@ function VideoPlayer({ videoInfo, audioUrl, onEnded }) {
         e.stopPropagation() // Prevent triggering play/pause
         const rect = e.currentTarget.getBoundingClientRect()
         const percent = (e.clientX - rect.left) / rect.width
-        const newTime = percent * duration
+        let newTime = percent * duration
+
+        if (!Number.isFinite(newTime)) return
+
         const media = useAudioOnly ? audioRef.current : videoRef.current
-        if (media) {
+
+        // Check if Proxy Stream
+        const currentStreamUrl = getStreamUrl()
+        const isProxy = currentStreamUrl && currentStreamUrl.includes('/api/video/merge')
+
+        if (isProxy && videoRef.current) {
+            // Proxy Seeking: Reload Video with &t=
+            setStartTimeOffset(newTime)
+            // Remove existing t param if any
+            let baseUrl = currentStreamUrl.split('&t=')[0]
+            videoRef.current.src = `${baseUrl}&t=${newTime}`
+            videoRef.current.play().catch(e => { if (e.name !== 'NotAllowedError') console.error(e) })
+            setCurrentTime(newTime) // Update UI immediately
+        } else if (media) {
+            // Normal Seeking
             media.currentTime = newTime
         }
     }
 
     const formatTime = (seconds) => {
+        if (!Number.isFinite(seconds)) return '--:--'
         const mins = Math.floor(seconds / 60)
         const secs = Math.floor(seconds % 60)
         return `${mins}:${secs.toString().padStart(2, '0')}`
@@ -196,10 +374,23 @@ function VideoPlayer({ videoInfo, audioUrl, onEnded }) {
         const rect = e.currentTarget.getBoundingClientRect()
         const touch = e.touches[0]
         const percent = Math.max(0, Math.min(1, (touch.clientX - rect.left) / rect.width))
-        const newTime = percent * duration
+        let newTime = percent * duration
 
-        const media = useAudioOnly ? audioRef.current : videoRef.current
-        if (media) {
+        if (!Number.isFinite(newTime)) return
+
+        // Check if Proxy Stream
+        const currentStreamUrl = getStreamUrl()
+        const isProxy = currentStreamUrl && currentStreamUrl.includes('/api/video/merge')
+
+        if (isProxy && videoRef.current) {
+            // Proxy Seeking: Reload Video with &t=
+            setStartTimeOffset(newTime)
+            // Remove existing t param if any
+            let baseUrl = currentStreamUrl.split('&t=')[0]
+            videoRef.current.src = `${baseUrl}&t=${newTime}`
+            videoRef.current.play().catch(e => { if (e.name !== 'NotAllowedError') console.error(e) })
+            setCurrentTime(newTime)
+        } else if (media) {
             media.currentTime = newTime
         }
     }
@@ -402,6 +593,13 @@ function VideoPlayer({ videoInfo, audioUrl, onEnded }) {
                 </div>
             )}
 
+            {/* Dual Subtitle Overlay (Secondary) */}
+            {secondarySubtitleText && (
+                <div className="subtitle-overlay secondary">
+                    {secondarySubtitleText}
+                </div>
+            )}
+
             {/* Custom controls */}
             <div
                 className="player-controls"
@@ -430,7 +628,9 @@ function VideoPlayer({ videoInfo, audioUrl, onEnded }) {
                     onTouchEnd={(e) => e.stopPropagation()}
                 >
                     <div className="progress-bar">
-                        <div className="progress-fill" style={{ width: `${progress}%` }} />
+                        <div className="progress-fill" style={{ width: `${progress}%` }}>
+                            <div className="progress-handle" />
+                        </div>
                     </div>
                     {/* Hit area visualizer/expander */}
                     <div className="progress-hit-area" />
@@ -440,11 +640,20 @@ function VideoPlayer({ videoInfo, audioUrl, onEnded }) {
                     {formatTime(currentTime)} / {formatTime(duration)}
                 </span>
 
+                {/* Settings Button */}
+                <button
+                    className="control-button"
+                    onClick={() => setShowSettings(!showSettings)}
+                >
+                    <svg viewBox="0 0 24 24" fill="currentColor" width="24" height="24">
+                        <path d="M19.14,12.94c0.04-0.3,0.06-0.61,0.06-0.94c0-0.32-0.02-0.64-0.07-0.94l2.03-1.58c0.18-0.14,0.23-0.41,0.12-0.61 l-1.92-3.32c-0.12-0.22-0.37-0.29-0.59-0.22l-2.39,0.96c-0.5-0.38-1.03-0.7-1.62-0.94L14.4,2.81c-0.04-0.24-0.24-0.41-0.48-0.41 h-3.84c-0.24,0-0.43,0.17-0.47,0.41L9.25,5.35C8.66,5.59,8.12,5.92,7.63,6.29L5.24,5.33c-0.22-0.08-0.47,0-0.59,0.22L2.74,8.87 C2.62,9.08,2.66,9.34,2.86,9.49l2.03,1.58C4.84,11.36,4.8,11.69,4.8,12s0.02,0.64,0.07,0.94l-2.03,1.58 c-0.18,0.14-0.23,0.41-0.12,0.61l1.92,3.32c0.12,0.22,0.37,0.29,0.59,0.22l2.39-0.96c0.5,0.38,1.03,0.7,1.62,0.94l0.36,2.54 c0.05,0.24,0.24,0.41,0.48,0.41h3.84c0.24,0,0.44-0.17,0.47-0.41l0.36-2.54c0.59-0.24,1.13-0.56,1.62-0.94l2.39,0.96 c0.22,0.08,0.47,0,0.59-0.22l1.92-3.32c0.12-0.22,0.07-0.47-0.12-0.61L19.14,12.94z M12,15.6c-1.98,0-3.6-1.62-3.6-3.6 s1.62-3.6,3.6-3.6s3.6,1.62,3.6,3.6S13.98,15.6,12,15.6z" />
+                    </svg>
+                </button>
+
                 {/* Fullscreen Button */}
                 <button
                     className="control-button"
                     onClick={(e) => { e.stopPropagation(); handleFullscreenToggle() }}
-                    style={{ marginLeft: 'auto' }}
                 >
                     {isFullscreen ? (
                         <svg viewBox="0 0 24 24" fill="currentColor" width="24" height="24">
@@ -457,6 +666,76 @@ function VideoPlayer({ videoInfo, audioUrl, onEnded }) {
                     )}
                 </button>
             </div>
+
+            {/* Settings Overlay */}
+            {showSettings && (
+                <div className="settings-overlay" onClick={() => setShowSettings(false)}>
+                    <div className="settings-menu" onClick={(e) => e.stopPropagation()}>
+                        <div className="settings-section">
+                            <h3>畫質</h3>
+                            <div className="settings-options">
+                                {availableQualities.map(q => (
+                                    <button
+                                        key={q}
+                                        className={quality === q ? 'active' : ''}
+                                        onClick={() => handleQualityChange(q)}
+                                    >
+                                        {q}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+
+                        <div className="settings-section">
+                            <h3>播放速度</h3>
+                            <div className="settings-options">
+                                {[0.5, 1.0, 1.25, 1.5, 2.0, 3.0, 4.0].map(speed => (
+                                    <button
+                                        key={speed}
+                                        className={playbackRate === speed ? 'active' : ''}
+                                        onClick={() => handleSpeedChange(speed)}
+                                    >
+                                        {speed}x
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+
+                        {/* Subtitles Section */}
+                        <div className="settings-section">
+                            <h3>主字幕 (原生)</h3>
+                            <select
+                                value={primarySubtitle?.lang || ''}
+                                onChange={(e) => {
+                                    const sub = videoInfo.subtitles?.find(s => s.lang === e.target.value)
+                                    setPrimarySubtitle(sub || null)
+                                }}
+                            >
+                                <option value="">關閉</option>
+                                {videoInfo?.subtitles?.map((sub, i) => (
+                                    <option key={i} value={sub.lang}>{sub.label}</option>
+                                ))}
+                            </select>
+                        </div>
+
+                        <div className="settings-section">
+                            <h3>副字幕 (翻譯)</h3>
+                            <select
+                                value={secondarySubtitle?.lang || ''}
+                                onChange={(e) => {
+                                    const sub = videoInfo.subtitles?.find(s => s.lang === e.target.value)
+                                    setSecondarySubtitle(sub || null)
+                                }}
+                            >
+                                <option value="">關閉</option>
+                                {videoInfo?.subtitles?.map((sub, i) => (
+                                    <option key={i} value={sub.lang}>{sub.label}</option>
+                                ))}
+                            </select>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             <style>{`
         .player-container {
@@ -600,6 +879,28 @@ function VideoPlayer({ videoInfo, audioUrl, onEnded }) {
           height: 100%;
           background: #ff0000;
           transition: width 0.1s linear;
+          position: relative;
+        }
+
+        .progress-handle {
+            position: absolute;
+            right: -6px;
+            top: 50%;
+            transform: translateY(-50%) scale(0);
+            width: 12px;
+            height: 12px;
+            background: #ff0000;
+            border-radius: 50%;
+            transition: transform 0.1s;
+        }
+
+        .progress-container:hover .progress-handle,
+        .progress-container:active .progress-handle {
+            transform: translateY(-50%) scale(1);
+        }
+        
+        .progress-container:active .progress-handle {
+             transform: translateY(-50%) scale(1.3);
         }
         
         /* Transparent hit area to make seeking easier */
@@ -684,6 +985,99 @@ function VideoPlayer({ videoInfo, audioUrl, onEnded }) {
             20% { opacity: 1; transform: translate(-50%, -50%) scale(1.1); }
             80% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
             100% { opacity: 0; transform: translate(-50%, -50%) scale(0.9); }
+        }
+
+        /* Settings Menu */
+        .settings-overlay {
+            position: absolute;
+            inset: 0;
+            background: rgba(0,0,0,0.6);
+            z-index: 20;
+            display: flex;
+            justify-content: flex-end;
+            align-items: flex-end;
+            padding-bottom: 60px; /* Above controls */
+            padding-right: 20px;
+        }
+
+        .settings-menu {
+            background: #222;
+            border-radius: 12px;
+            padding: 16px;
+            width: 280px;
+            max-height: 70%;
+            overflow-y: auto;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+            animation: slideUp 0.2s ease-out;
+        }
+
+        @keyframes slideUp {
+            from { transform: translateY(20px); opacity: 0; }
+            to { transform: translateY(0); opacity: 1; }
+        }
+
+        .settings-section {
+            margin-bottom: 16px;
+        }
+        .settings-section h3 {
+            margin: 0 0 8px 0;
+            font-size: 14px;
+            color: #aaa;
+        }
+
+        .settings-options {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+
+        .settings-options button {
+            background: #333;
+            border: 1px solid transparent;
+            color: white;
+            padding: 6px 12px;
+            border-radius: 16px;
+            cursor: pointer;
+            font-size: 13px;
+        }
+        .settings-options button.active {
+            background: #fff;
+            color: #000;
+        }
+        
+        select {
+            width: 100%;
+            background: #333;
+            color: white;
+            padding: 8px;
+            border-radius: 8px;
+            border: none;
+            outline: none;
+        }
+
+        /* Secondary Subtitle Overlay */
+        .subtitle-overlay {
+            position: absolute;
+            bottom: 80px; /* Above controls */
+            left: 0; 
+            right: 0;
+            text-align: center;
+            pointer-events: none;
+            z-index: 5;
+        }
+        
+        .subtitle-overlay.secondary {
+             bottom: 120px; /* Above primary subs usually */
+             color: #ffd700; /* Gold color for distinction */
+             text-shadow: 0 2px 4px rgba(0,0,0,0.8);
+             font-size: 16px;
+             font-weight: bold;
+             background: rgba(0,0,0,0.4);
+             display: inline-block;
+             margin: 0 auto;
+             padding: 4px 12px;
+             border-radius: 4px;
+             max-width: 80%;
         }
 
       `}</style>

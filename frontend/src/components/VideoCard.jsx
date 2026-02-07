@@ -1,5 +1,6 @@
 import { useNavigate } from 'react-router-dom'
 import { motion } from 'framer-motion'
+import { formatTimeAgo } from '../utils/date'
 
 function formatDuration(seconds) {
     if (!seconds) return ''
@@ -22,18 +23,6 @@ function formatViews(count) {
         return `${(count / 1000).toFixed(1)}K 次觀看`
     }
     return `${count} 次觀看`
-}
-
-function formatDate(dateStr) {
-    if (!dateStr) return ''
-    // yt-dlp returns YYYYMMDD
-    if (dateStr.length === 8) {
-        const y = dateStr.substring(0, 4)
-        const m = dateStr.substring(4, 6)
-        const d = dateStr.substring(6, 8)
-        return `${y}/${m}/${d}`
-    }
-    return dateStr
 }
 
 function VideoCard({ video, type = 'vertical' }) {
@@ -92,7 +81,7 @@ function VideoCard({ video, type = 'vertical' }) {
                     {video.published_at && (
                         <>
                             <span style={{ margin: '0 4px' }}>•</span>
-                            <span>{formatDate(video.published_at)}</span>
+                            <span>{formatTimeAgo(video.published_at)}</span>
                         </>
                     )}
                 </div>

@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useParams, useNavigate, useLocation } from 'react-router-dom'
 import { motion } from 'framer-motion'
+import { formatTimeAgo } from '../utils/date'
 import VideoPlayer from '../components/VideoPlayer'
 import VideoCard from '../components/VideoCard'
 import AddToPlaylistModal from '../components/AddToPlaylistModal'
@@ -66,6 +67,12 @@ function Watch() {
                     channel_thumbnail: videoInfo.author_thumbnail
                 })
                 setIsSubscribed(true)
+
+                // Auto-sync feed
+                import('../services/api').then(({ feedApi }) => {
+                    console.log('Auto-syncing feed...')
+                    feedApi.sync().catch(console.error)
+                })
             }
         } catch (err) {
             console.error(err)
@@ -253,8 +260,9 @@ function Watch() {
 
     if (loading) {
         return (
-            <div className="loading">
+            <div className="loading" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '50vh', gap: '16px' }}>
                 <div className="spinner" />
+                <span style={{ color: '#fff', fontSize: '1.2rem' }}>載入影片中...</span>
             </div>
         )
     }
@@ -320,6 +328,11 @@ function Watch() {
                                 <span className="action-button">
                                     👁️ {formatViews(videoInfo?.view_count)}
                                 </span>
+                                {videoInfo?.published_at && (
+                                    <span className="action-button">
+                                        📅 {formatTimeAgo(videoInfo.published_at)}
+                                    </span>
+                                )}
                                 <button className="action-button" onClick={() => {
                                     navigator.clipboard.writeText(window.location.href)
                                     alert('連結已複製!')
@@ -631,7 +644,7 @@ function Watch() {
                 onClose={() => setShowPlaylistModal(false)}
                 videoInfo={videoInfo}
             />
-        </motion.div>
+        </motion.div >
     )
 }
 

@@ -1,5 +1,5 @@
-from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.orm import Session, selectinload
+from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
+from sqlalchemy.orm import Session
 from sqlalchemy import select, delete, desc
 from typing import List, Optional
 from pydantic import BaseModel
@@ -69,6 +69,7 @@ async def check_subscription_status(
 @router.post("/", response_model=SubscriptionResponse)
 async def subscribe_channel(
     sub_data: SubscriptionCreate,
+    background_tasks: BackgroundTasks,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
@@ -92,7 +93,26 @@ async def subscribe_channel(
     db.add(new_sub)
     await db.commit()
     await db.refresh(new_sub)
+    
+    # Trigger background sync for this channel immediately
+    background_tasks.add_task(sync_new_channel, sub_data.channel_id)
+    
     return new_sub
+
+async def sync_new_channel(channel_id: str):
+    """Background task to sync a single channel"""
+    from database.connection import AsyncSessionLocal
+    from services.sync_service import sync_service
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    async with AsyncSessionLocal() as db:
+        try:
+             logger.info(f"Syncing new subscription: {channel_id}")
+             await sync_service.sync_channel_uploads(db, channel_id, limit=5)
+             logger.info(f"Finished syncing new subscription: {channel_id}")
+        except Exception as e:
+             logger.error(f"Failed to sync new subscription {channel_id}: {e}")
 
 @router.delete("/{channel_id}")
 async def unsubscribe_channel(
