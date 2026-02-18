@@ -19,6 +19,9 @@ CREATE TABLE IF NOT EXISTS watch_history (
     video_author VARCHAR(200),
     video_duration INTEGER,
     progress_seconds INTEGER DEFAULT 0,
+    duration_watched INTEGER DEFAULT 0,
+    completion_rate FLOAT DEFAULT 0.0,
+    interaction_type VARCHAR(50) DEFAULT 'view',
     watched_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(user_id, video_id)
 );

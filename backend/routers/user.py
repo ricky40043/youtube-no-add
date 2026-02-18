@@ -74,9 +74,22 @@ async def login(user: UserLogin, db: AsyncSession = Depends(get_db)):
     }
 
 from fastapi.security import OAuth2PasswordBearer
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token", auto_error=False)
 
-async def get_current_user(token: str = Depends(oauth2_scheme), db: AsyncSession = Depends(get_db)):
+async def get_current_user(token: Optional[str] = Depends(oauth2_scheme), db: AsyncSession = Depends(get_db)):
+    # Guest Mode: If no token, return User ID 1 (Default User)
+    if not token:
+        result = await db.execute(select(User).filter(User.id == 1))
+        user = result.scalars().first()
+        if user:
+            return user
+        # If User 1 doesn't exist (shouldn't happen based on checks), raise 401
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Guest user not found",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
     # Simple mock validation
     if not token.startswith("mock-token-"):
          raise HTTPException(

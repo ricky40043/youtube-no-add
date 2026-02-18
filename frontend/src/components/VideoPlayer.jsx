@@ -297,6 +297,47 @@ function VideoPlayer({ videoInfo, audioUrl, onEnded }) {
         }
     }, [currentTime, duration, setPositionState])
 
+    // Auto-Rotate on Fullscreen
+    useEffect(() => {
+        const video = videoRef.current
+        if (!video) return
+
+        const handleFullscreenChange = async () => {
+            // Check if browser supports orientation lock (Mainly Android)
+            if (screen.orientation && screen.orientation.lock) {
+                if (document.fullscreenElement) {
+                    // Scenario A: Enter Fullscreen -> Force Landscape
+                    try {
+                        await screen.orientation.lock('landscape')
+                        console.log('✅ 螢幕已鎖定為橫向')
+                    } catch (err) {
+                        console.warn('⚠️ 鎖定橫向失敗 (可能是裝置不支援或被系統阻擋):', err)
+                    }
+                } else {
+                    // Scenario B: Exit Fullscreen -> Unlock (Return to portrait/sensor)
+                    try {
+                        screen.orientation.unlock()
+                        console.log('✅ 螢幕鎖定已解除')
+                    } catch (err) {
+                        console.warn('⚠️ 解除鎖定失敗:', err)
+                    }
+                }
+            }
+        }
+
+        const handleIOSFullscreen = () => {
+            console.log('🍎 iOS 原生播放器啟動，依賴系統自動旋轉')
+        }
+
+        document.addEventListener('fullscreenchange', handleFullscreenChange)
+        video.addEventListener('webkitbeginfullscreen', handleIOSFullscreen) // iOS specific
+
+        return () => {
+            document.removeEventListener('fullscreenchange', handleFullscreenChange)
+            if (video) video.removeEventListener('webkitbeginfullscreen', handleIOSFullscreen)
+        }
+    }, [useAudioOnly])
+
     // Event handlers
     const handleTimeUpdate = (e) => {
         setCurrentTime(e.target.currentTime + startTimeOffset)

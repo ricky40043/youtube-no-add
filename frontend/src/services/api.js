@@ -99,6 +99,11 @@ export const playlistApi = {
         // data: { title, description }
         const response = await api.put(`/api/playlists/${playlistId}`, data)
         return response.data
+    },
+    import: async (data) => {
+        // data: { url, user_id }
+        const response = await api.post('/api/playlists/import', data)
+        return response.data
     }
 }
 
@@ -190,7 +195,14 @@ export const authApi = {
         const token = localStorage.getItem('token')
         const username = localStorage.getItem('username')
         const userId = localStorage.getItem('userId')
-        if (!token) return null
+        // Guest Mode fallback (for personal single-user instance)
+        if (!token) {
+            return {
+                username: 'Guest',
+                token: null,
+                id: 1 // Default to ID 1
+            }
+        }
         return {
             username,
             token,

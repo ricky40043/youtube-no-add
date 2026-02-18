@@ -34,10 +34,10 @@ class HistoryResponse(BaseModel):
         return cls(
             id=obj.id,
             video_id=obj.video_id,
-            title=obj.video_title,  # Map DB 'video_title' to API 'title'
-            thumbnail=obj.video_thumbnail,  # Map DB 'video_thumbnail' to API 'thumbnail'
+            title=obj.video_title or "Unknown Title",  # Map DB 'video_title' to API 'title', handle NULL
+            thumbnail=obj.video_thumbnail or "",  # Map DB 'video_thumbnail' to API 'thumbnail', handle NULL
             watched_at=obj.watched_at,
-            progress_seconds=obj.progress_seconds
+            progress_seconds=obj.progress_seconds or 0 # Ensure integer
         )
 
 @router.get("/", response_model=List[HistoryResponse])

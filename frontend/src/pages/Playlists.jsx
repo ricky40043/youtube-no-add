@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 
-import api, { authApi } from '../services/api'
+import api, { authApi, playlistApi } from '../services/api'
 
 function Playlists() {
     const [playlists, setPlaylists] = useState([])
@@ -21,10 +21,8 @@ function Playlists() {
 
     const fetchPlaylists = async () => {
         try {
-            const response = await api.get('/api/playlists', {
-                params: { user_id: user?.id }
-            })
-            setPlaylists(response.data)
+            const data = await playlistApi.getAll(user?.id)
+            setPlaylists(data)
         } catch (err) {
             console.error("Failed to load playlists", err)
         } finally {
@@ -35,7 +33,7 @@ function Playlists() {
     const handleCreate = async (e) => {
         e.preventDefault()
         try {
-            await api.post('/api/playlists', {
+            await playlistApi.create({
                 title: newTitle,
                 description: '',
                 user_id: user?.id
@@ -56,7 +54,7 @@ function Playlists() {
         e.preventDefault()
         setLoading(true)
         try {
-            await api.post('/api/playlists/import', {
+            await playlistApi.import({
                 url: importUrl,
                 user_id: user?.id
             })
