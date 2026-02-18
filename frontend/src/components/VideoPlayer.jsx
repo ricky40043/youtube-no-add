@@ -2,6 +2,9 @@ import { useEffect, useRef, useState, useCallback } from 'react'
 import Hls from 'hls.js'
 import useMediaSession from '../hooks/useMediaSession'
 
+// iOS detection (module-level for consistency)
+const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream
+
 function VideoPlayer({ videoInfo, audioUrl, onEnded }) {
     const videoRef = useRef(null)
     const audioRef = useRef(null)
@@ -14,6 +17,7 @@ function VideoPlayer({ videoInfo, audioUrl, onEnded }) {
     const [feedback, setFeedback] = useState({ show: false, text: '', icon: null })
     const [isFullscreen, setIsFullscreen] = useState(false)
     const [startTimeOffset, setStartTimeOffset] = useState(0) // Track offset for proxy seeking
+    const [playbackError, setPlaybackError] = useState(false) // Track playback errors for iOS switch button
 
     // Gesture refs
     const lastTapTime = useRef(0)
@@ -118,7 +122,7 @@ function VideoPlayer({ videoInfo, audioUrl, onEnded }) {
         if (!videoInfo?.streams) return
 
         // Filter for video streams (including HLS)
-        const videoStreams = videoInfo.streams.filter(s => s.type === 'combined' || s.type === 'video' || s.type === 'hls')
+        let videoStreams = videoInfo.streams.filter(s => s.type === 'combined' || s.type === 'video' || s.type === 'hls')
 
         // Extract unique qualities
         const qualities = [...new Set(videoStreams.map(s => s.quality))].sort((a, b) => {
@@ -142,27 +146,29 @@ function VideoPlayer({ videoInfo, audioUrl, onEnded }) {
         }
     }, [videoInfo])
 
-    // Find stream URL based on current quality
-    const getStreamUrl = useCallback(() => {
+    // Find the selected stream object
+    const getSelectedStream = useCallback(() => {
         if (!videoInfo?.streams?.length) return null
 
-        // If specific quality selected
         if (quality !== 'auto') {
             const stream = videoInfo.streams.find(s => s.quality === quality && (s.type === 'combined' || s.type === 'video' || s.type === 'hls'))
-            if (stream) return stream.url
+            if (stream) return stream
         }
 
-        // Fallback or Auto logic if 'auto' string is used (backward compat)
-        // Prefer HLS
+        // Fallback or Auto
         const hls = videoInfo.streams.find(s => s.type === 'hls')
-        if (hls) return hls.url
+        if (hls) return hls
 
-        // Fallback: Prefer highest quality combined
         const videoStreams = videoInfo.streams.filter(s => s.type === 'combined' || s.type === 'video')
         videoStreams.sort((a, b) => (parseInt(b.quality) || 0) - (parseInt(a.quality) || 0))
 
-        return videoStreams[0]?.url || videoInfo.streams[0]?.url
+        return videoStreams[0] || videoInfo.streams[0] || null
     }, [videoInfo, quality])
+
+    // Get stream URL (convenience wrapper)
+    const getStreamUrl = useCallback(() => {
+        return getSelectedStream()?.url || null
+    }, [getSelectedStream])
 
     // Handle Quality Change
     const handleQualityChange = (newQuality) => {
@@ -219,6 +225,9 @@ function VideoPlayer({ videoInfo, audioUrl, onEnded }) {
         const streamUrl = getStreamUrl()
         if (!streamUrl && !audioUrl) return
 
+        // Clear previous error
+        setPlaybackError(false)
+
         // If only audio URL available, use audio mode
         if (!streamUrl && audioUrl) {
             setUseAudioOnly(true)
@@ -263,7 +272,6 @@ function VideoPlayer({ videoInfo, audioUrl, onEnded }) {
         } else {
             // Direct video URL
             if (video.src !== streamUrl) {
-                // If seeking (streamUrl contains &t=), don't set savedTime
                 video.src = streamUrl
                 video.play().catch(e => { if (e.name !== 'NotAllowedError') console.error(e) })
             }
@@ -358,20 +366,20 @@ function VideoPlayer({ videoInfo, audioUrl, onEnded }) {
 
         const media = useAudioOnly ? audioRef.current : videoRef.current
 
-        // Check if Proxy Stream
-        const currentStreamUrl = getStreamUrl()
-        const isProxy = currentStreamUrl && currentStreamUrl.includes('/api/video/merge')
+        // Check if this is a merge proxy (needs &t= reload for seeking)
+        const currentStream = getSelectedStream()
+        const isMergeProxy = currentStream?.proxy_type === 'merge'
 
-        if (isProxy && videoRef.current) {
-            // Proxy Seeking: Reload Video with &t=
+        if (isMergeProxy && videoRef.current) {
+            // Merge Proxy Seeking: Reload Video with &t=
             setStartTimeOffset(newTime)
-            // Remove existing t param if any
-            let baseUrl = currentStreamUrl.split('&t=')[0]
+            let currentUrl = currentStream.url
+            let baseUrl = currentUrl.split('&t=')[0]
             videoRef.current.src = `${baseUrl}&t=${newTime}`
             videoRef.current.play().catch(e => { if (e.name !== 'NotAllowedError') console.error(e) })
             setCurrentTime(newTime) // Update UI immediately
         } else if (media) {
-            // Normal Seeking
+            // Normal Seeking (direct proxy with Range support, HLS, etc.)
             media.currentTime = newTime
         }
     }
@@ -402,19 +410,22 @@ function VideoPlayer({ videoInfo, audioUrl, onEnded }) {
 
         if (!Number.isFinite(newTime)) return
 
-        // Check if Proxy Stream
-        const currentStreamUrl = getStreamUrl()
-        const isProxy = currentStreamUrl && currentStreamUrl.includes('/api/video/merge')
+        const media = useAudioOnly ? audioRef.current : videoRef.current
 
-        if (isProxy && videoRef.current) {
-            // Proxy Seeking: Reload Video with &t=
+        // Check if this is a merge proxy (needs &t= reload for seeking)
+        const currentStream = getSelectedStream()
+        const isMergeProxy = currentStream?.proxy_type === 'merge'
+
+        if (isMergeProxy && videoRef.current) {
+            // Merge Proxy Seeking: Reload Video with &t=
             setStartTimeOffset(newTime)
-            // Remove existing t param if any
-            let baseUrl = currentStreamUrl.split('&t=')[0]
+            let currentUrl = currentStream.url
+            let baseUrl = currentUrl.split('&t=')[0]
             videoRef.current.src = `${baseUrl}&t=${newTime}`
             videoRef.current.play().catch(e => { if (e.name !== 'NotAllowedError') console.error(e) })
             setCurrentTime(newTime)
         } else if (media) {
+            // Normal Seeking (direct proxy with Range support, HLS, etc.)
             media.currentTime = newTime
         }
     }
@@ -599,35 +610,102 @@ function VideoPlayer({ videoInfo, audioUrl, onEnded }) {
                         onError={(e) => {
                             const err = e.target.error
                             console.error('Video Error:', err)
-                            setFeedback({
-                                show: true,
-                                text: `Error: ${err?.code || 'Unknown'} - ${err?.message || 'Playback Error'}`,
-                                icon: '⚠️',
-                                persistent: true
-                            })
+                            setPlaybackError(true)
+                            setIsPlaying(false)
                         }}
                     />
 
-                    {/* Debug Info Overlay for Mobile */}
-                    {feedback.show && feedback.persistent && (
+                    {/* Playback Error — Red Switch Button */}
+                    {playbackError && (
                         <div style={{
                             position: 'absolute',
-                            top: '10%',
-                            left: '5%',
-                            right: '5%',
-                            background: 'rgba(0,0,0,0.8)',
-                            color: '#ff4444',
-                            padding: '10px',
-                            borderRadius: '8px',
+                            top: 0, left: 0, right: 0, bottom: 0,
+                            display: 'flex',
+                            flexDirection: 'column',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            background: 'rgba(0,0,0,0.85)',
                             zIndex: 100,
-                            fontSize: '12px',
-                            whiteSpace: 'pre-wrap',
-                            pointerEvents: 'none'
+                            gap: '16px',
+                            padding: '20px',
                         }}>
-                            <h3>Playback Error</h3>
-                            <p>{feedback.text}</p>
-                            <p>SRC: {videoRef.current?.src}</p>
-                            <p>Type: {getStreamUrl()?.includes('merge') ? 'Proxy' : 'Direct'}</p>
+                            <div style={{ fontSize: '48px' }}>⚠️</div>
+                            <div style={{ color: '#ff6b6b', fontSize: '16px', fontWeight: 'bold', textAlign: 'center' }}>
+                                此畫質無法播放
+                            </div>
+                            <div style={{ color: '#aaa', fontSize: '13px', textAlign: 'center' }}>
+                                目前畫質: {quality}
+                            </div>
+                            {/* Switch to 360p (most compatible, show first) */}
+                            {availableQualities.includes('360p') && quality !== '360p' && (
+                                <button
+                                    onClick={() => {
+                                        setPlaybackError(false)
+                                        handleQualityChange('360p')
+                                    }}
+                                    style={{
+                                        background: '#e53935',
+                                        color: 'white',
+                                        border: 'none',
+                                        borderRadius: '12px',
+                                        padding: '14px 32px',
+                                        fontSize: '16px',
+                                        fontWeight: 'bold',
+                                        cursor: 'pointer',
+                                        minWidth: '200px',
+                                        boxShadow: '0 4px 15px rgba(229,57,53,0.4)',
+                                    }}
+                                >
+                                    📱 切換至 360p（最穩定）
+                                </button>
+                            )}
+                            {/* Switch to Auto (HLS) — only if NOT already on Auto */}
+                            {availableQualities.find(q => q.includes('Auto')) && !quality.toLowerCase().includes('auto') && (
+                                <button
+                                    onClick={() => {
+                                        setPlaybackError(false)
+                                        handleQualityChange(availableQualities.find(q => q.includes('Auto')))
+                                    }}
+                                    style={{
+                                        background: '#424242',
+                                        color: 'white',
+                                        border: '1px solid #666',
+                                        borderRadius: '12px',
+                                        padding: '12px 32px',
+                                        fontSize: '14px',
+                                        cursor: 'pointer',
+                                        minWidth: '200px',
+                                    }}
+                                >
+                                    🔄 切換至 Auto（最高畫質）
+                                </button>
+                            )}
+                            {/* Show other available qualities as fallback */}
+                            {availableQualities
+                                .filter(q => q !== quality && q !== '360p' && !q.includes('Auto'))
+                                .slice(0, 2)
+                                .map(q => (
+                                    <button
+                                        key={q}
+                                        onClick={() => {
+                                            setPlaybackError(false)
+                                            handleQualityChange(q)
+                                        }}
+                                        style={{
+                                            background: '#333',
+                                            color: '#ccc',
+                                            border: '1px solid #555',
+                                            borderRadius: '12px',
+                                            padding: '10px 32px',
+                                            fontSize: '13px',
+                                            cursor: 'pointer',
+                                            minWidth: '200px',
+                                        }}
+                                    >
+                                        🔀 切換至 {q}
+                                    </button>
+                                ))
+                            }
                         </div>
                     )}
 
@@ -640,7 +718,7 @@ function VideoPlayer({ videoInfo, audioUrl, onEnded }) {
                     )}
 
                     {/* Play/Pause overlay indicator (only when paused or waiting) */}
-                    {!isPlaying && !feedback.show && (
+                    {!isPlaying && !feedback.show && !playbackError && (
                         <div className="play-indicator paused">
                             <svg viewBox="0 0 24 24" fill="white" width="60" height="60">
                                 <path d="M8 5v14l11-7z" />

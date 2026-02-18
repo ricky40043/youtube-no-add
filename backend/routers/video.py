@@ -22,6 +22,7 @@ async def merge_stream(request: Request, v: Optional[str] = None, a: Optional[st
     try:
         # Resolve ID if provided
         vcodec = None
+        cached_data = {}
         if id:
             cached_data = await cache_service.get(f"proxy:{id}")
             if cached_data:
@@ -103,6 +104,12 @@ async def merge_stream(request: Request, v: Optional[str] = None, a: Optional[st
         # Smart transcoding: if source is H.264 (avc1), copy directly (fast).
         # If source is VP9/AV1, transcode to H.264 so iOS/Safari can play it.
         need_transcode = not (vcodec and vcodec.startswith('avc1'))
+        
+        # Use Standard fMP4 for all clients (Restoring stable state)
+        output_format = 'mp4'
+        media_type = 'video/mp4'
+        movflags = ['-movflags', 'frag_keyframe+empty_moov+default_base_moof']
+
         print(f"[DEBUG] Merge request. v_len={len(v)}, a_len={len(a)}, start_time={t}, vcodec={vcodec}, transcode={need_transcode}")
 
         # Build FFmpeg command
@@ -118,7 +125,7 @@ async def merge_stream(request: Request, v: Optional[str] = None, a: Optional[st
 
         if need_transcode:
             # Transcode VP9/AV1 → H.264 for universal compatibility
-            # Force yuv420p and main profile for Safari/iOS
+            # Force yuv420p and main profile for Safari/iOS support
             cmd += ['-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '23', '-pix_fmt', 'yuv420p', '-profile:v', 'main']
         else:
             # Already H.264, just copy (zero CPU)
@@ -127,17 +134,22 @@ async def merge_stream(request: Request, v: Optional[str] = None, a: Optional[st
         cmd += [
             '-c:a', 'aac',  # Ensure audio is AAC
             '-b:a', '192k',
-            '-f', 'mp4',
-            '-movflags', 'frag_keyframe+empty_moov+default_base_moof', # Required for streaming MP4
-            '-'
+            '-f', output_format,
         ]
         
+        if movflags:
+            cmd += movflags
+            
+        cmd.append('-')
+        
         # Create subprocess
-        print(f"[DEBUG] Spawning ffmpeg...")
+        print(f"[DEBUG] Spawning ffmpeg... Output: {output_format}")
+        # print(f"[DEBUG] Command: {' '.join(cmd)}")
+        
         process = await asyncio.create_subprocess_exec(
             *cmd,
             stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE # Capture stderr to debug ffmpeg failures
+            stderr=asyncio.subprocess.PIPE # Capture stderr
         )
         print(f"[DEBUG] FFmpeg spawned. PID: {process.pid}")
         
@@ -146,7 +158,6 @@ async def merge_stream(request: Request, v: Optional[str] = None, a: Optional[st
                 while True:
                     data = await process.stdout.read(32 * 1024)
                     if not data:
-                        # Check if ffmpeg failed
                         if process.returncode is not None and process.returncode != 0:
                             err = await process.stderr.read()
                             print(f"[ERROR] FFmpeg failed: {err.decode()}")
@@ -161,11 +172,13 @@ async def merge_stream(request: Request, v: Optional[str] = None, a: Optional[st
                     except:
                         pass
 
-        return StreamingResponse(stream_generator(), media_type="video/mp4")
+        return StreamingResponse(stream_generator(), media_type=media_type)
+    except HTTPException as ie:
+        raise ie
     except Exception as e:
         import traceback
         traceback.print_exc()
-        raise HTTPException(status_code=500, detail=str(e))
+        return Response(content=f"Internal Server Error: {str(e)}", status_code=500)
 
 @router.get("/info/{video_id}")
 async def get_video_info(video_id: str):

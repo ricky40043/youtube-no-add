@@ -6,6 +6,7 @@ import VideoPlayer from '../components/VideoPlayer'
 import VideoCard from '../components/VideoCard'
 import AddToPlaylistModal from '../components/AddToPlaylistModal'
 import { videoApi, historyApi, authApi, playlistApi, subscriptionApi } from '../services/api'
+import YouTube from 'react-youtube'
 
 function Watch() {
     const { videoId } = useParams()
@@ -22,6 +23,33 @@ function Watch() {
     const [playlistError, setPlaylistError] = useState(null) // New error state
     const [showPlaylistModal, setShowPlaylistModal] = useState(false)
     const [useEmbed, setUseEmbed] = useState(true) // Default to Embed mode for better compatibility
+    const [embedError, setEmbedError] = useState(false)
+
+    const onPlayerReady = (event) => {
+        // access to player in all event handlers via event.target
+    }
+
+    const onPlayerError = (e) => {
+        console.error('YouTube Player Error:', e.data)
+        setEmbedError(true)
+    }
+
+    const onPlayerStateChange = (e) => {
+        // If playing (1) or buffering (3), clear error
+        if (e.data === 1 || e.data === 3) {
+            setEmbedError(false)
+        }
+    }
+
+    const embedOpts = {
+        height: '100%',
+        width: '100%',
+        playerVars: {
+            autoplay: 1,
+            modestbranding: 1,
+            rel: 0,
+        },
+    }
 
     // Playlist state
     const [playlistItems, setPlaylistItems] = useState([])
@@ -344,17 +372,62 @@ function Watch() {
                             }}
                         >
                             {useEmbed ? (
-                                <iframe
-                                    width="100%"
-                                    height="100%"
-                                    src={embedSrc}
-                                    title={videoInfo?.title || "YouTube video player"}
-                                    frameBorder="0"
-                                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-                                    allowFullScreen
-                                    style={{ width: '100%', height: '100%' }}
-                                    referrerPolicy="no-referrer-when-downgrade"
-                                ></iframe>
+                                <div style={{ position: 'relative', width: '100%', height: '100%' }}>
+                                    <YouTube
+                                        videoId={videoId}
+                                        opts={embedOpts}
+                                        className="youtube-player-container"
+                                        style={{ width: '100%', height: '100%' }}
+                                        onReady={onPlayerReady}
+                                        onError={onPlayerError}
+                                        onStateChange={onPlayerStateChange}
+                                    />
+
+                                    {/* Smart Error Overlay - ONLY shows when YouTube fails */}
+                                    {embedError && (
+                                        <div style={{
+                                            position: 'absolute',
+                                            top: 0,
+                                            left: 0,
+                                            width: '100%',
+                                            height: '100%',
+                                            display: 'flex',
+                                            flexDirection: 'column',
+                                            alignItems: 'center',
+                                            justifyContent: 'center',
+                                            background: 'rgba(0,0,0,0.85)',
+                                            zIndex: 50,
+                                            backdropFilter: 'blur(4px)',
+                                        }}>
+                                            <div style={{ fontSize: '48px', marginBottom: '16px' }}>⚠️</div>
+                                            <div style={{ color: '#fff', fontSize: '18px', fontWeight: 'bold', marginBottom: '8px' }}>
+                                                此影片無法在嵌入模式播放
+                                            </div>
+                                            <div style={{ color: '#ccc', fontSize: '14px', marginBottom: '24px' }}>
+                                                可能因版權或區域限制
+                                            </div>
+                                            <button
+                                                onClick={() => setUseEmbed(false)}
+                                                style={{
+                                                    background: '#e53935',
+                                                    color: 'white',
+                                                    border: 'none',
+                                                    borderRadius: '24px',
+                                                    padding: '12px 32px',
+                                                    fontSize: '16px',
+                                                    fontWeight: 'bold',
+                                                    cursor: 'pointer',
+                                                    boxShadow: '0 4px 15px rgba(229,57,53,0.5)',
+                                                    display: 'flex',
+                                                    alignItems: 'center',
+                                                    gap: '8px',
+                                                }}
+                                            >
+                                                🔄 切換播放器
+                                            </button>
+                                        </div>
+                                    )}
+                                </div>
                             ) : (
                                 <>
                                     <VideoPlayer

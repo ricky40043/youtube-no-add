@@ -111,9 +111,9 @@ function Search() {
             transition={{ duration: 0.3 }}
             style={{ paddingBottom: '40px' }}
         >
-            <h1 style={{ marginBottom: '24px', fontSize: '1.25rem' }}>
+            {/* <h1 style={{ marginBottom: '24px', fontSize: '1.25rem' }}>
                 搜尋結果：{query}
-            </h1>
+            </h1> */}
 
             {/* Initial Loading */}
             {loading && videos.length === 0 && (

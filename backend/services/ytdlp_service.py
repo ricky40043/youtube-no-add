@@ -218,7 +218,8 @@ class YtDlpService:
                     "url": proxy_url,
                     "format": "webm", # FFmpeg output
                     "filesize": 0,
-                    "is_proxy": True 
+                    "is_proxy": True,
+                    "proxy_type": "merge"
                 })
 
         # Add native combined formats (Proxified for stability & Range support)
@@ -240,6 +241,7 @@ class YtDlpService:
             headers.update({
                 "url": proxy_url,
                 "is_proxy": True,
+                "proxy_type": "direct",
                 "_original_url": fmt['url'] # Keep original just in case
             })
             streams.append(headers)
