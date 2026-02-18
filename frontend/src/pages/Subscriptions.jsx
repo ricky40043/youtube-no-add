@@ -65,6 +65,22 @@ function Subscriptions() {
         }
     }
 
+    // Handle Notification Toggle
+    const handleToggleNotify = async (e, channelId, currentStatus) => {
+        e.stopPropagation()
+        try {
+            const res = await subscriptionApi.toggleNotification(channelId)
+            setSubscriptions(subs => subs.map(sub =>
+                sub.channel_id === channelId
+                    ? { ...sub, notify_enabled: res.notify_enabled }
+                    : sub
+            ))
+        } catch (err) {
+            console.error(err)
+            alert('操作失敗')
+        }
+    }
+
     if (loading) return <div className="loading"><div className="spinner" /></div>
 
     return (
@@ -94,12 +110,29 @@ function Subscriptions() {
                                     <span className="sub-date">訂閱於 {new Date(sub.subscribed_at).toLocaleDateString()}</span>
                                 </div>
                             </div>
-                            <button
-                                className="unsubscribe-btn"
-                                onClick={(e) => handleUnsubscribeClick(e, sub.channel_id)}
-                            >
-                                取消訂閱
-                            </button>
+                            <div className="card-actions">
+                                <button
+                                    className={`notify-btn ${sub.notify_enabled ? 'active' : ''}`}
+                                    onClick={(e) => handleToggleNotify(e, sub.channel_id, sub.notify_enabled)}
+                                    title={sub.notify_enabled ? "關閉通知" : "開啟通知"}
+                                >
+                                    {sub.notify_enabled ? (
+                                        <svg viewBox="0 0 24 24" fill="currentColor">
+                                            <path d="M7.58 4.08L6.15 2.65C3.75 4.48 2.17 7.3 2.03 10.5h2c.15-2.65 1.51-4.97 3.55-6.42zm12.39 6.42h2c-.15-3.2-1.73-6.02-4.12-7.85l-1.42 1.43c2.02 1.45 3.39 3.77 3.54 6.42zM18 11c0-3.07-1.64-5.64-4.5-6.32V4c0-.83-.67-1.5-1.5-1.5s-1.5.67-1.5 1.5v.68C7.63 5.36 6 7.92 6 11v5l-2 2v1h16v-1l-2-2v-5zm-6 11c.14 0 .27-.01.4-.04.65-.14 1.18-.58 1.44-1.18.1-.24.16-.49.16-.78h-4c0 1.1.9 2 2 2z" />
+                                        </svg>
+                                    ) : (
+                                        <svg viewBox="0 0 24 24" fill="currentColor">
+                                            <path d="M12 22c1.1 0 2-.9 2-2h-4c0 1.1.9 2 2 2zm6-6v-5c0-3.07-1.63-5.64-4.5-6.32V4c0-.83-.67-1.5-1.5-1.5s-1.5.67-1.5 1.5v.68C7.64 5.36 6 7.92 6 11v5l-2 2v1h16v-1l-2-2zm-2 1H8v-6c0-2.48 1.51-4.5 4-4.5s4 2.02 4 4.5v6z" />
+                                        </svg>
+                                    )}
+                                </button>
+                                <button
+                                    className="unsubscribe-btn"
+                                    onClick={(e) => handleUnsubscribeClick(e, sub.channel_id)}
+                                >
+                                    取消訂閱
+                                </button>
+                            </div>
                         </div>
                     ))}
                 </div>
@@ -140,6 +173,12 @@ function Subscriptions() {
                 .subscription-card:hover {
                     border-color: var(--accent-color);
                 }
+                .card-actions {
+                    display: flex;
+                    align-items: center;
+                    gap: 8px;
+                    z-index: 2;
+                }
                 .channel-info {
                     display: flex;
                     align-items: center;
@@ -178,6 +217,29 @@ function Subscriptions() {
                 .unsubscribe-btn:hover {
                     background: rgba(255, 50, 50, 0.2);
                     color: #ff5555;
+                }
+                .notify-btn {
+                    background: transparent;
+                    border: none;
+                    color: var(--text-secondary);
+                    cursor: pointer;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    padding: 8px;
+                    border-radius: 50%;
+                    transition: all 0.2s;
+                }
+                .notify-btn:hover {
+                    background: rgba(255, 255, 255, 0.1);
+                    color: var(--text-primary);
+                }
+                .notify-btn.active {
+                    color: var(--accent-color);
+                }
+                .notify-btn svg {
+                    width: 24px;
+                    height: 24px;
                 }
             `}</style>
         </motion.div>

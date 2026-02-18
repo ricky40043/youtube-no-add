@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import VideoCard from '../components/VideoCard'
 import { searchApi } from '../services/api'
+import { updateSearchHistoryThumbnail } from '../utils/searchHistory'
 
 function Search() {
     const [searchParams] = useSearchParams()
@@ -30,6 +31,11 @@ function Search() {
                 setVideos(results)
                 setOffset(20)
                 if (results.length < 20) setHasMore(false)
+
+                // Save first result thumbnail to search history
+                if (results.length > 0 && results[0].thumbnail) {
+                    updateSearchHistoryThumbnail(query, results[0].thumbnail)
+                }
             } catch (err) {
                 console.error('Search failed:', err)
                 setError('搜尋失敗，請稍後再試')

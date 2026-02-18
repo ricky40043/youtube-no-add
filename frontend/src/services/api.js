@@ -1,14 +1,8 @@
 import axios from 'axios'
 
-// Use the current host for API calls (supports mobile testing)
-const getApiUrl = () => {
-    const hostname = window.location.hostname
-    // If running on localhost, use localhost:8000
-    // Otherwise use the same hostname with port 8000
-    return `http://${hostname}:8000`
-}
-
-const API_URL = import.meta.env.VITE_API_URL || getApiUrl()
+// Use relative path to leverage Vite Proxy (configured in vite.config.js)
+// This avoids CORS issues and firewall blocks on port 8000
+const API_URL = import.meta.env.VITE_API_URL || ''
 
 const api = axios.create({
     baseURL: API_URL,
@@ -130,6 +124,16 @@ export const subscriptionApi = {
     },
     getFeed: async () => {
         const response = await api.get('/api/subscriptions/feed')
+        return response.data
+    },
+    toggleNotification: async (channelId, enable = null) => {
+        const params = enable !== null ? `?enable=${enable}` : ''
+        const response = await api.put(`/api/subscriptions/${encodeURIComponent(channelId)}/notify${params}`)
+        window.dispatchEvent(new Event('notification-change'))
+        return response.data
+    },
+    getNotifications: async () => {
+        const response = await api.get('/api/subscriptions/notifications')
         return response.data
     }
 }

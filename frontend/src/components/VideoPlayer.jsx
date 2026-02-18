@@ -133,8 +133,11 @@ function VideoPlayer({ videoInfo, audioUrl, onEnded }) {
 
         setAvailableQualities(qualities)
 
-        // Default to highest quality (Auto if available, else 1080p...)
-        if (qualities.length > 0) {
+        // Default: If "360p" exists, use it (User Request for compatibility/speed)
+        // Otherwise use the first one (Highest or Auto)
+        if (qualities.includes("360p")) {
+            setQuality("360p")
+        } else if (qualities.length > 0) {
             setQuality(qualities[0])
         }
     }, [videoInfo])
@@ -291,10 +294,31 @@ function VideoPlayer({ videoInfo, audioUrl, onEnded }) {
         setCurrentTime(e.target.currentTime + startTimeOffset)
     }
 
+    // Duration Persistence
+    const maxKnownDuration = useRef(0)
+
+    // Reset known duration when video changes
+    useEffect(() => {
+        maxKnownDuration.current = 0
+        setDuration(0)
+    }, [videoInfo?.id])
+
     const handleLoadedMetadata = (e) => {
         const d = e.target.duration
         if (Number.isFinite(d)) {
-            setDuration(d)
+            // Logic: Only update duration if it's the longest valid time we've seen
+            // This prevents "8 seconds" bug when switching to fMP4 from valid 360p
+            if (d > maxKnownDuration.current) {
+                maxKnownDuration.current = d
+                setDuration(d)
+                console.log(`[Player] Updated duration to ${d}`)
+            } else if (maxKnownDuration.current > 0) {
+                // If we already know the duration is longer, force the player to acknowledge it
+                // But we don't need to setDuration because it's already set to max
+                console.log(`[Player] Ignoring short duration ${d}, keeping ${maxKnownDuration.current}`)
+            } else {
+                setDuration(d)
+            }
         } else if (videoInfo?.duration) {
             // Fallback to metadata duration if stream duration is Infinity (e.g. proxy)
             setDuration(videoInfo.duration)
@@ -572,7 +596,40 @@ function VideoPlayer({ videoInfo, audioUrl, onEnded }) {
                         onPlay={handlePlayEvent}
                         onPause={handlePauseEvent}
                         onEnded={handleEndedEvent}
+                        onError={(e) => {
+                            const err = e.target.error
+                            console.error('Video Error:', err)
+                            setFeedback({
+                                show: true,
+                                text: `Error: ${err?.code || 'Unknown'} - ${err?.message || 'Playback Error'}`,
+                                icon: '⚠️',
+                                persistent: true
+                            })
+                        }}
                     />
+
+                    {/* Debug Info Overlay for Mobile */}
+                    {feedback.show && feedback.persistent && (
+                        <div style={{
+                            position: 'absolute',
+                            top: '10%',
+                            left: '5%',
+                            right: '5%',
+                            background: 'rgba(0,0,0,0.8)',
+                            color: '#ff4444',
+                            padding: '10px',
+                            borderRadius: '8px',
+                            zIndex: 100,
+                            fontSize: '12px',
+                            whiteSpace: 'pre-wrap',
+                            pointerEvents: 'none'
+                        }}>
+                            <h3>Playback Error</h3>
+                            <p>{feedback.text}</p>
+                            <p>SRC: {videoRef.current?.src}</p>
+                            <p>Type: {getStreamUrl()?.includes('merge') ? 'Proxy' : 'Direct'}</p>
+                        </div>
+                    )}
 
                     {/* Gesture Feedback Overlay */}
                     {feedback.show && (
@@ -886,7 +943,7 @@ function VideoPlayer({ videoInfo, audioUrl, onEnded }) {
             position: absolute;
             right: -6px;
             top: 50%;
-            transform: translateY(-50%) scale(0);
+            transform: translateY(-50%) scale(1);
             width: 12px;
             height: 12px;
             background: #ff0000;
@@ -896,7 +953,7 @@ function VideoPlayer({ videoInfo, audioUrl, onEnded }) {
 
         .progress-container:hover .progress-handle,
         .progress-container:active .progress-handle {
-            transform: translateY(-50%) scale(1);
+            transform: translateY(-50%) scale(1.3);
         }
         
         .progress-container:active .progress-handle {

@@ -70,6 +70,7 @@ class Subscription(Base):
     channel_id = Column(String, index=True)
     channel_name = Column(String)
     channel_thumbnail = Column(String, nullable=True)
+    notify_enabled = Column(Boolean, default=False)
     subscribed_at = Column(DateTime, default=datetime.utcnow)
 
     user = relationship("User", back_populates="subscriptions")

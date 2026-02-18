@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { motion } from 'framer-motion'
 import VideoCard from '../components/VideoCard'
-import { searchApi, feedApi, authApi } from '../services/api'
+import { searchApi, feedApi, authApi, subscriptionApi } from '../services/api'
 
 function Home() {
     const [videos, setVideos] = useState([])
@@ -9,9 +9,10 @@ function Home() {
     const [error, setError] = useState(null)
     const [user] = useState(authApi.getCurrentUser())
 
-    // 'recommended' | 'trending'
+    // 'recommended' | 'trending' | 'notifications'
     const [activeTab, setActiveTab] = useState(user ? 'recommended' : 'trending')
     const [syncing, setSyncing] = useState(false)
+    const [notifications, setNotifications] = useState([])
 
     // Pagination state
     const [cursor, setCursor] = useState(null)
@@ -57,6 +58,22 @@ function Home() {
         }
     }
 
+    // Fetch Notifications
+    const fetchNotifications = async () => {
+        setLoading(true)
+        setError(null)
+        try {
+            const data = await subscriptionApi.getNotifications()
+            setVideos(data) // Reuse setVideos to render VideoCards
+            setHasMore(false)
+        } catch (err) {
+            console.error("Failed to fetch notifications:", err)
+            setError("無法載入通知")
+        } finally {
+            setLoading(false)
+        }
+    }
+
     // Initial load when tab changes
     useEffect(() => {
         setVideos([])
@@ -65,9 +82,22 @@ function Home() {
 
         if (activeTab === 'recommended' && user) {
             fetchFeed(true)
+        } else if (activeTab === 'notifications' && user) {
+            fetchNotifications()
         } else {
             fetchTrending()
         }
+    }, [activeTab, user])
+
+    // Listen for notification changes globally
+    useEffect(() => {
+        const handleNotifyChange = () => {
+            if (activeTab === 'notifications' && user) {
+                fetchNotifications()
+            }
+        }
+        window.addEventListener('notification-change', handleNotifyChange)
+        return () => window.removeEventListener('notification-change', handleNotifyChange)
     }, [activeTab, user])
 
     // Auto-sync on mount
@@ -158,6 +188,21 @@ function Home() {
                     🔥 熱門發燒
                 </button>
 
+                {user && (
+                    <button
+                        onClick={() => setActiveTab('notifications')}
+                        style={{
+                            fontSize: '1.2rem',
+                            fontWeight: activeTab === 'notifications' ? 'bold' : 'normal',
+                            color: activeTab === 'notifications' ? 'var(--accent)' : 'var(--text-secondary)',
+                            borderBottom: activeTab === 'notifications' ? '2px solid var(--accent)' : 'none',
+                            paddingBottom: '4px'
+                        }}
+                    >
+                        🔔 最新通知
+                    </button>
+                )}
+
                 <div style={{ flex: 1 }}></div>
 
                 {/* Sync Button Removed (Auto Sync Enabled) */}
@@ -167,7 +212,12 @@ function Home() {
                 <div className="error-message">
                     <h2>😕 載入失敗</h2>
                     <p>{error}</p>
-                    <button onClick={() => activeTab === 'recommended' ? fetchFeed(true) : fetchTrending()} style={{ marginTop: '16px', textDecoration: 'underline' }}>重試</button>
+                    <p>{error}</p>
+                    <button onClick={() => {
+                        if (activeTab === 'recommended') fetchFeed(true)
+                        else if (activeTab === 'trending') fetchTrending()
+                        else fetchNotifications()
+                    }} style={{ marginTop: '16px', textDecoration: 'underline' }}>重試</button>
                 </div>
             ) : (
                 <>
@@ -175,7 +225,9 @@ function Home() {
                         <div style={{ textAlign: 'center', padding: '40px', color: '#666' }}>
                             {activeTab === 'recommended'
                                 ? '還沒有推薦內容，試著先同步訂閱或觀看一些影片吧！'
-                                : '沒有影片'}
+                                : activeTab === 'notifications'
+                                    ? '過去 24 小時內沒有新通知'
+                                    : '沒有影片'}
                         </div>
                     ) : (
                         <div className="video-grid">

@@ -21,6 +21,7 @@ function Watch() {
     const [error, setError] = useState(null)
     const [playlistError, setPlaylistError] = useState(null) // New error state
     const [showPlaylistModal, setShowPlaylistModal] = useState(false)
+    const [useEmbed, setUseEmbed] = useState(true) // Default to Embed mode for better compatibility
 
     // Playlist state
     const [playlistItems, setPlaylistItems] = useState([])
@@ -35,6 +36,7 @@ function Watch() {
 
     // Subscription State
     const [isSubscribed, setIsSubscribed] = useState(false)
+    const [notifyEnabled, setNotifyEnabled] = useState(false)
 
     // Check subscription status
     useEffect(() => {
@@ -44,7 +46,10 @@ function Watch() {
         }
 
         subscriptionApi.checkStatus(videoInfo.channel_id)
-            .then(res => setIsSubscribed(res.is_subscribed))
+            .then(res => {
+                setIsSubscribed(res.is_subscribed)
+                setNotifyEnabled(res.notify_enabled)
+            })
             .catch(err => console.error("Failed to check subscription:", err))
     }, [videoInfo])
 
@@ -77,6 +82,16 @@ function Watch() {
         } catch (err) {
             console.error(err)
             alert('操作失敗，請稍後再試')
+        }
+    }
+
+    const handleToggleNotify = async () => {
+        try {
+            const res = await subscriptionApi.toggleNotification(videoInfo.channel_id)
+            setNotifyEnabled(res.notify_enabled)
+        } catch (err) {
+            console.error(err)
+            alert('操作失敗')
         }
     }
 
@@ -192,6 +207,16 @@ function Watch() {
         fetchVideo()
     }, [videoId])
 
+    // Stabilize the iframe URL to prevent unnecessary reloads during UI re-renders
+    const embedSrc = useMemo(() => {
+        return `https://www.youtube.com/embed/${videoId}?autoplay=1&playsinline=1`
+    }, [videoId])
+
+    // Reset player mode when video changes
+    useEffect(() => {
+        setUseEmbed(true)
+    }, [videoId])
+
     // Auto-play next logic
     const handleVideoEnd = useCallback(() => {
         console.log('[Watch] Video ended. Checking auto-play...')
@@ -260,9 +285,21 @@ function Watch() {
 
     if (loading) {
         return (
-            <div className="loading" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '50vh', gap: '16px' }}>
-                <div className="spinner" />
-                <span style={{ color: '#fff', fontSize: '1.2rem' }}>載入影片中...</span>
+            <div className="loading-container" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '80vh' }}>
+                <img src="/logo.svg" className="loading-logo" alt="Loading..." />
+                <p style={{ marginTop: '16px', color: '#888', fontSize: '1rem' }}>載入影片中...</p>
+                <style>{`
+                    .loading-logo {
+                        width: 80px;
+                        height: 80px;
+                        animation: breathe 2s infinite ease-in-out;
+                    }
+                    @keyframes breathe {
+                        0% { transform: scale(1); opacity: 0.8; }
+                        50% { transform: scale(1.1); opacity: 1; }
+                        100% { transform: scale(1); opacity: 0.8; }
+                    }
+                `}</style>
             </div>
         )
     }
@@ -302,20 +339,82 @@ function Watch() {
                             style={{
                                 aspectRatio: videoInfo?.width && videoInfo?.height
                                     ? `${videoInfo.width} / ${videoInfo.height}`
-                                    : '16 / 9'
+                                    : '16 / 9',
+                                position: 'relative'
                             }}
                         >
-                            <VideoPlayer
-                                videoInfo={videoInfo}
-                                audioUrl={audioUrl}
-                                onEnded={handleVideoEnd}
-                            />
+                            {useEmbed ? (
+                                <iframe
+                                    width="100%"
+                                    height="100%"
+                                    src={embedSrc}
+                                    title={videoInfo?.title || "YouTube video player"}
+                                    frameBorder="0"
+                                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                                    allowFullScreen
+                                    style={{ width: '100%', height: '100%' }}
+                                    referrerPolicy="no-referrer-when-downgrade"
+                                ></iframe>
+                            ) : (
+                                <>
+                                    <VideoPlayer
+                                        videoInfo={videoInfo}
+                                        audioUrl={audioUrl}
+                                        onEnded={handleVideoEnd}
+                                    />
+                                    {/* Floating YouTube fallback link when in proxy mode */}
+                                    <a
+                                        href={`https://www.youtube.com/watch?v=${videoId}`}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        style={{
+                                            position: 'absolute',
+                                            bottom: '50px',
+                                            right: '12px',
+                                            padding: '8px 14px',
+                                            background: 'rgba(0,0,0,0.7)',
+                                            color: '#fff',
+                                            border: '1px solid rgba(255,255,255,0.3)',
+                                            borderRadius: '20px',
+                                            fontSize: '0.8rem',
+                                            textDecoration: 'none',
+                                            zIndex: 10,
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            gap: '4px',
+                                            backdropFilter: 'blur(8px)'
+                                        }}
+                                    >
+                                        <svg viewBox="0 0 24 24" fill="currentColor" width="14" height="14">
+                                            <path d="M19 19H5V5h7V3H5a2 2 0 00-2 2v14a2 2 0 002 2h14c1.1 0 2-.9 2-2v-7h-2v7zM14 3v2h3.59l-9.83 9.83 1.41 1.41L19 6.41V10h2V3h-7z" />
+                                        </svg>
+                                        YouTube
+                                    </a>
+                                </>
+                            )}
                         </div>
 
                         <div className="video-details">
                             <h1>{videoInfo?.title}</h1>
 
                             <div className="video-actions">
+                                {/* Switch Button */}
+                                <button
+                                    className="action-button"
+                                    onClick={() => setUseEmbed(!useEmbed)}
+                                    title={useEmbed ? "切換至無廣告模式 (Proxy)" : "切換至穩定模式 (Embed)"}
+                                    style={{
+                                        background: useEmbed ? '#333' : 'var(--accent-color)',
+                                        color: '#fff',
+                                        border: '1px solid rgba(255,255,255,0.2)',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        gap: '6px'
+                                    }}
+                                >
+                                    {useEmbed ? '🌐 切換播放器' : '📺 切換回 YouTube'}
+                                </button>
+
                                 {playlistId && (
                                     <button
                                         className={`action-button ${isShuffle ? 'active' : ''}`}
@@ -367,6 +466,32 @@ function Watch() {
                                     >
                                         {isSubscribed ? '已訂閱' : '訂閱'}
                                     </button>
+
+                                    {isSubscribed && (
+                                        <button
+                                            onClick={handleToggleNotify}
+                                            title={notifyEnabled ? "關閉通知" : "開啟通知"}
+                                            style={{
+                                                background: 'transparent',
+                                                border: 'none',
+                                                cursor: 'pointer',
+                                                marginLeft: '8px',
+                                                display: 'flex',
+                                                alignItems: 'center',
+                                                color: notifyEnabled ? 'var(--accent-color)' : 'var(--text-secondary)'
+                                            }}
+                                        >
+                                            {notifyEnabled ? (
+                                                <svg viewBox="0 0 24 24" fill="currentColor" style={{ width: '24px', height: '24px' }}>
+                                                    <path d="M7.58 4.08L6.15 2.65C3.75 4.48 2.17 7.3 2.03 10.5h2c.15-2.65 1.51-4.97 3.55-6.42zm12.39 6.42h2c-.15-3.2-1.73-6.02-4.12-7.85l-1.42 1.43c2.02 1.45 3.39 3.77 3.54 6.42zM18 11c0-3.07-1.64-5.64-4.5-6.32V4c0-.83-.67-1.5-1.5-1.5s-1.5.67-1.5 1.5v.68C7.63 5.36 6 7.92 6 11v5l-2 2v1h16v-1l-2-2v-5zm-6 11c.14 0 .27-.01.4-.04.65-.14 1.18-.58 1.44-1.18.1-.24.16-.49.16-.78h-4c0 1.1.9 2 2 2z" />
+                                                </svg>
+                                            ) : (
+                                                <svg viewBox="0 0 24 24" fill="currentColor" style={{ width: '24px', height: '24px' }}>
+                                                    <path d="M12 22c1.1 0 2-.9 2-2h-4c0 1.1.9 2 2 2zm6-6v-5c0-3.07-1.63-5.64-4.5-6.32V4c0-.83-.67-1.5-1.5-1.5s-1.5.67-1.5 1.5v.68C7.64 5.36 6 7.92 6 11v5l-2 2v1h16v-1l-2-2zm-2 1H8v-6c0-2.48 1.51-4.5 4-4.5s4 2.02 4 4.5v6z" />
+                                                </svg>
+                                            )}
+                                        </button>
+                                    )}
                                 </div>
 
                                 <p className="description-text">
@@ -614,10 +739,11 @@ function Watch() {
                     background: #444;
                 }
 
-                @media (max-width: 1000px) {
+                @media (max-width: 1024px) {
                     .watch-container {
                         flex-direction: column;
                         padding: 0;
+                        gap: 0;
                     }
 
                     .main-content {
@@ -631,6 +757,7 @@ function Watch() {
                     
                     .video-container {
                         border-radius: 0;
+                        margin-bottom: 0;
                     }
                     
                      .video-details {

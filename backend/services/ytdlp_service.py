@@ -128,6 +128,10 @@ class YtDlpService:
                 })
             # Combined video+audio stream (most mobile-friendly)
             elif vcodec != "none" and acodec != "none":
+                # STRICTLY enforce MP4 for direct proxy compatibility (Safari/iOS)
+                if fmt.get("ext") != "mp4":
+                    continue
+
                 height = fmt.get("height", 0)
                 quality = f"{height}p" if height else fmt.get("format_note", "unknown")
                 
@@ -137,7 +141,7 @@ class YtDlpService:
                         "type": "combined",
                         "quality": quality,
                         "url": url,
-                        "format": fmt.get("ext", "mp4"),
+                        "format": "mp4", # Confirmed MP4
                         "filesize": fmt.get("filesize"),
                         "tbr": fmt.get("tbr"),
                     }
@@ -151,13 +155,27 @@ class YtDlpService:
                     # Add as potential proxy target
                     # We store it in a separate list to process after finding best audio
                     if 'video_only' not in combined_formats: combined_formats['video_only'] = []
-                    combined_formats['video_only'].append({
+                    
+                    # Check if this quality already exists in list
+                    existing_idx = next((i for i, x in enumerate(combined_formats['video_only']) if x['quality'] == quality), -1)
+                    
+                    new_entry = {
                         "height": height,
                         "url": url,
                         "format": fmt.get("ext", "mp4"),
                         "quality": quality,
-                        "fps": fmt.get("fps", 30)
-                    })
+                        "fps": fmt.get("fps", 30),
+                        "vcodec": vcodec
+                    }
+
+                    if existing_idx == -1:
+                        combined_formats['video_only'].append(new_entry)
+                    else:
+                        # If existing is NOT avc1 but new one IS avc1, replace it (Prefer H.264)
+                        existing = combined_formats['video_only'][existing_idx]
+                        if not existing.get('vcodec', '').startswith('avc1') and vcodec.startswith('avc1'):
+                            combined_formats['video_only'][existing_idx] = new_entry
+                        # Or if same codec preference but higher bitrate/fps? (Optional)
         
         # Find best audio first
         best_audio_url = None
@@ -187,7 +205,8 @@ class YtDlpService:
                 # We store as dict, cache_service handles json serialization
                 await cache_service.set(f"proxy:{proxy_id}", {
                     "v": v['url'], 
-                    "a": best_audio_url
+                    "a": best_audio_url,
+                    "vcodec": v.get('vcodec', '')
                 }, ttl=3600)
 
                 proxy_url = f"/api/video/merge?id={proxy_id}"
@@ -202,17 +221,37 @@ class YtDlpService:
                     "is_proxy": True 
                 })
 
-        # Add native combined formats
-        quality_order = ["1080p", "720p", "480p", "360p", "296p", "240p", "144p"]
+        # Add native combined formats (Proxified for stability & Range support)
+        # Prioritize 360p for speed/default, then 720p for quality
+        quality_order = ["360p", "720p", "480p", "1080p", "240p", "144p"]
+        
+        # Helper to proxify a format
+        async def add_proxified_stream(q, fmt):
+            proxy_id = str(uuid.uuid4())
+            await cache_service.set(f"proxy:{proxy_id}", {
+                "type": "direct",
+                "url": fmt['url']
+            }, ttl=3600)
+            
+            proxy_url = f"/api/video/merge?id={proxy_id}"
+            print(f"[DEBUG] Generated DIRECT proxy ID: {proxy_id} for {q}")
+            
+            headers = fmt.copy()
+            headers.update({
+                "url": proxy_url,
+                "is_proxy": True,
+                "_original_url": fmt['url'] # Keep original just in case
+            })
+            streams.append(headers)
+
         for q in quality_order:
             if q in combined_formats:
-                streams.append(combined_formats[q])
-                # Remove so we don't add again
+                await add_proxified_stream(q, combined_formats[q])
                 del combined_formats[q]
         
         # Add remaining combined
         for q, fmt in combined_formats.items():
-            streams.append(fmt)
+            await add_proxified_stream(q, fmt)
             
         # Add HLS Manifest (Enable 1080p+ Adaptive Streaming)
         # yt-dlp usually exposes this as 'manifest_url' (HLS) or 'manifest_url_hls'

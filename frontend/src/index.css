@@ -129,8 +129,9 @@ input {
 }
 
 .navbar-logo svg {
-  width: 32px;
-  height: 32px;
+  width: 28px;
+  height: 28px;
+  display: block;
 }
 
 /* Search Bar */
@@ -285,7 +286,7 @@ input {
   }
 
   .main-content {
-    padding: var(--spacing-md);
+    padding: 0;
   }
 
   .video-grid {

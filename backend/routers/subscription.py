@@ -17,12 +17,14 @@ class SubscriptionCreate(BaseModel):
     channel_id: str
     channel_name: str
     channel_thumbnail: Optional[str] = None
+    notify_enabled: bool = False
 
 class SubscriptionResponse(BaseModel):
     id: int
     channel_id: str
     channel_name: str
     channel_thumbnail: Optional[str]
+    notify_enabled: bool
     subscribed_at: datetime
     
     class Config:
@@ -63,8 +65,10 @@ async def check_subscription_status(
             Subscription.channel_id == channel_id
         )
     )
-    is_subscribed = sub.scalar_one_or_none() is not None
-    return {"is_subscribed": is_subscribed}
+    sub_obj = sub.scalar_one_or_none()
+    is_subscribed = sub_obj is not None
+    notify_enabled = sub_obj.notify_enabled if sub_obj else False
+    return {"is_subscribed": is_subscribed, "notify_enabled": notify_enabled}
 
 @router.post("/", response_model=SubscriptionResponse)
 async def subscribe_channel(
@@ -88,7 +92,8 @@ async def subscribe_channel(
         user_id=current_user.id,
         channel_id=sub_data.channel_id,
         channel_name=sub_data.channel_name,
-        channel_thumbnail=sub_data.channel_thumbnail
+        channel_thumbnail=sub_data.channel_thumbnail,
+        notify_enabled=sub_data.notify_enabled
     )
     db.add(new_sub)
     await db.commit()
@@ -181,3 +186,87 @@ async def get_subscription_feed(
     unique_videos.sort(key=lambda x: x.get('published_at') or '00000000', reverse=True)
     
     return unique_videos
+
+@router.put("/{channel_id}/notify")
+async def toggle_notification(
+    channel_id: str,
+    enable: Optional[bool] = None,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Toggle notification for a subscription"""
+    stmt = select(Subscription).filter(
+        Subscription.user_id == current_user.id,
+        Subscription.channel_id == channel_id
+    )
+    result = await db.execute(stmt)
+    sub = result.scalar_one_or_none()
+    
+    if not sub:
+        raise HTTPException(status_code=404, detail="Subscription not found")
+        
+    if enable is not None:
+        sub.notify_enabled = enable
+    else:
+        sub.notify_enabled = not sub.notify_enabled
+        
+    await db.commit()
+    return {"message": "Notification updated", "notify_enabled": sub.notify_enabled}
+
+@router.get("/notifications", response_model=List[VideoFeedItem])
+async def get_notifications(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Get videos from subscribed channels with notifications enabled, 
+    published within the last 24 hours.
+    """
+    # 1. Get channels with notifications enabled
+    stmt = select(Subscription).filter(
+        Subscription.user_id == current_user.id,
+        Subscription.notify_enabled == True
+    )
+    result = await db.execute(stmt)
+    subs = result.scalars().all()
+    
+    if not subs:
+        return []
+        
+    target_channel_ids = [sub.channel_id for sub in subs]
+    
+    # 2. Query Videos table for these channels, published in last 24h
+    # Note: We rely on the SyncService/Background tasks to populate 'videos' table.
+    from database.models import Video
+    from datetime import timedelta
+    
+    # Relaxed to 7 days to ensure users see notifications during testing/low volume
+    twenty_four_hours_ago = datetime.utcnow() - timedelta(days=7)
+    
+    video_stmt = select(Video).filter(
+        Video.channel_id.in_(target_channel_ids),
+        Video.published_at >= twenty_four_hours_ago
+    ).order_by(desc(Video.published_at))
+    
+    video_res = await db.execute(video_stmt)
+    videos = video_res.scalars().all()
+    
+    # 3. Convert to VideoFeedItem
+    feed_items = []
+    for v in videos:
+        # We need author name, usually stored in Subscription or Channel table.
+        # Simple lookup map from our subs list
+        channel_name_map = {s.channel_id: s.channel_name for s in subs}
+        
+        feed_items.append(VideoFeedItem(
+            id=v.id,
+            title=v.title,
+            thumbnail=f"https://i.ytimg.com/vi/{v.id}/mqdefault.jpg", # Fallback logic
+            author=channel_name_map.get(v.channel_id, "Unknown"),
+            channel_id=v.channel_id,
+            published_at=v.published_at.isoformat() if v.published_at else None,
+            view_count=v.view_count,
+            duration=v.duration
+        ))
+        
+    return feed_items

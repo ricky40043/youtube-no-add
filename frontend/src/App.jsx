@@ -10,6 +10,7 @@ import Playlists from './pages/Playlists'
 import PlaylistDetail from './pages/PlaylistDetail'
 import Profile from './pages/Profile'
 import Subscriptions from './pages/Subscriptions'
+import Notifications from './pages/Notifications'
 
 function App() {
     return (
@@ -25,6 +26,7 @@ function App() {
                     <Route path="/playlists" element={<Playlists />} />
                     <Route path="/playlists/:id" element={<PlaylistDetail />} />
                     <Route path="/subscriptions" element={<Subscriptions />} />
+                    <Route path="/notifications" element={<Notifications />} />
                     <Route path="/profile" element={<Profile />} />
                 </Routes>
             </main>

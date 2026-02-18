@@ -20,18 +20,24 @@ function BottomNav() {
     return (
         <div className="bottom-nav">
 
-            <Link to="/" className={`nav-item ${location.pathname === '/' ? 'active' : ''}`}>
-                <span className="icon">🏠</span>
-                <span className="label">首頁</span>
+            <Link to="/subscriptions" className={`nav-item ${location.pathname === '/subscriptions' ? 'active' : ''}`}>
+                <svg viewBox="0 0 24 24">
+                    <path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h9l-3-3zm9.54-1.5l-1.41-1.41-3.07 3.07-1.39-1.39-1.41 1.41 2.8 2.8 4.48-4.48z" />
+                </svg>
+                <span className="label">訂閱</span>
             </Link>
 
             <Link to="/playlists" className={`nav-item ${location.pathname.startsWith('/playlists') ? 'active' : ''}`}>
-                <span className="icon">📑</span>
-                <span className="label">播放清單</span>
+                <svg viewBox="0 0 24 24">
+                    <path d="M20 6h-16c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2v-12c0-1.1-.9-2-2-2zm0 14h-16v-12h16v12zm-2-16h-12v2h12v-2zm-4-4h-8v2h8v-2z" />
+                </svg>
+                <span className="label">影片清單</span>
             </Link>
 
             <Link to="/history" className={`nav-item ${location.pathname === '/history' ? 'active' : ''}`}>
-                <span className="icon">🕒</span>
+                <svg viewBox="0 0 24 24">
+                    <path d="M13 3c-4.97 0-9 4.03-9 9H1l3.89 3.89.07.14L9 12H6c0-3.87 3.13-7 7-7s7 3.13 7 7-3.13 7-7 7c-1.93 0-3.68-.79-4.94-2.06l-1.42 1.42C8.27 19.99 10.51 21 13 21c4.97 0 9-4.03 9-9s-4.03-9-9-9zm-1 5v5l4.28 2.54.72-1.21-3.5-2.08V8H12z" />
+                </svg>
                 <span className="label">紀錄</span>
             </Link>
 
@@ -44,10 +50,11 @@ function BottomNav() {
                         {user.username[0].toUpperCase()}
                     </div>
                 ) : (
-                    <svg viewBox="0 0 24 24" fill={location.pathname.includes('/auth') ? "currentColor" : "none"} stroke="currentColor" strokeWidth="2">
-                        <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
-                        <circle cx="12" cy="7" r="4"></circle>
-                    </svg>
+                    <div className="nav-avatar" style={{ background: 'transparent', border: '1px solid currentColor', color: 'currentColor' }}>
+                        <svg viewBox="0 0 24 24" style={{ width: '20px', height: '20px' }}>
+                            <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 3c1.66 0 3 1.34 3 3s-1.34 3-3 3-3-1.34-3-3 1.34-3 3-3zm0 14.2c-2.5 0-4.71-1.28-6-3.22.03-1.99 4-3.08 6-3.08 1.99 0 5.97 1.09 6 3.08-1.29 1.94-3.5 3.22-6 3.22z" />
+                        </svg>
+                    </div>
                 )}
                 <span>你</span>
             </button>
@@ -66,19 +73,22 @@ function BottomNav() {
                     justify-content: space-around;
                     align-items: center;
                     padding-bottom: env(safe-area-inset-bottom, 8px);
+                    height: 60px; /* Fixed height to ensure consistent layout */
                 }
 
                 .nav-item {
                     display: flex;
                     flex-direction: column;
                     align-items: center;
+                    justify-content: center;
                     gap: 4px;
                     background: none;
                     border: none;
                     color: var(--text-secondary);
                     font-size: 10px;
-                    padding: 4px 12px;
+                    padding: 4px 0;
                     width: 100%;
+                    flex: 1; /* Distribute space evenly */
                 }
 
                 .nav-item.active {
@@ -86,20 +96,21 @@ function BottomNav() {
                 }
 
                 .nav-item svg {
-                    width: 24px;
-                    height: 24px;
+                    width: 28px; /* Enlarge icons */
+                    height: 28px;
+                    fill: currentColor;
                 }
 
                 .nav-avatar {
-                    width: 24px;
-                    height: 24px;
+                    width: 32px; /* Enlarge Avatar (Red Box) */
+                    height: 32px;
                     border-radius: 50%;
                     background: var(--accent);
                     color: white;
                     display: flex;
                     align-items: center;
                     justify-content: center;
-                    font-size: 12px;
+                    font-size: 14px;
                     font-weight: bold;
                 }
 
@@ -109,7 +120,7 @@ function BottomNav() {
                     }
                     /* Add padding to body or main to prevent content being hidden behind nav */
                     .main-content {
-                        padding-bottom: 60px; 
+                        padding-bottom: 70px; 
                     }
                 }
             `}</style>
