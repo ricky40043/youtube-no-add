@@ -293,3 +293,19 @@ input {
     grid-template-columns: 1fr;
   }
 }
+
+/* Video Player Styles */
+.player-container,
+.player-wrapper {
+  width: 100%;
+  height: 100%;
+  background-color: #000;
+  position: relative;
+}
+
+.react-player {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  /* Ensures video fits within container without cropping */
+}

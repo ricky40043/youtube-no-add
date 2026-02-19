@@ -5,14 +5,23 @@ import useMediaSession from '../hooks/useMediaSession'
 // iOS detection (module-level for consistency)
 const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream
 
-function VideoPlayer({ videoInfo, audioUrl, onEnded, initialTime = 0, onTimeUpdate: onTimeUpdateCallback }) {
+function VideoPlayer({ videoInfo, audioUrl, onEnded, initialTime = 0, onTimeUpdate: onTimeUpdateCallback, externalAudioRef }) {
     const videoRef = useRef(null)
     const audioRef = useRef(null)
     const hlsRef = useRef(null)
     const [isPlaying, setIsPlaying] = useState(false)
     const [currentTime, setCurrentTime] = useState(0)
     const [duration, setDuration] = useState(0)
-    const [useAudioOnly, setUseAudioOnly] = useState(false)
+    const [volume, setVolume] = useState(1)
+    const [muted, setMuted] = useState(false)
+    const [playbackRate, setPlaybackRate] = useState(1.0)
+    const [quality, setQuality] = useState('Auto')
+    // Background Mode: Force Audio Only for mobile background play
+    const [backgroundMode, setBackgroundMode] = useState(() => localStorage.getItem('backgroundMode') === 'true')
+    const [autoAudioOnly, setAutoAudioOnly] = useState(false) // Auto-detected audio mode (no video stream)
+
+    // Combine manual preference and auto-detection
+    const useAudioOnly = backgroundMode || autoAudioOnly || !!externalAudioRef
 
     const [feedback, setFeedback] = useState({ show: false, text: '', icon: null })
     const [isFullscreen, setIsFullscreen] = useState(false)
@@ -28,7 +37,6 @@ function VideoPlayer({ videoInfo, audioUrl, onEnded, initialTime = 0, onTimeUpda
 
     // New State for Settings & Subtitles
     const [showSettings, setShowSettings] = useState(false)
-    const [playbackRate, setPlaybackRate] = useState(1.0)
     const [primarySubtitle, setPrimarySubtitle] = useState(null)
     const [secondarySubtitle, setSecondarySubtitle] = useState(null)
     const [secondarySubtitleText, setSecondarySubtitleText] = useState('')
@@ -112,7 +120,6 @@ function VideoPlayer({ videoInfo, audioUrl, onEnded, initialTime = 0, onTimeUpda
     }
 
     // Quality State
-    const [quality, setQuality] = useState('auto')
     const [availableQualities, setAvailableQualities] = useState([])
     const shouldRestoreTime = useRef(initialTime > 0)
     const savedTime = useRef(initialTime)
@@ -228,11 +235,22 @@ function VideoPlayer({ videoInfo, audioUrl, onEnded, initialTime = 0, onTimeUpda
         // Clear previous error
         setPlaybackError(false)
 
-        // If only audio URL available, use audio mode
-        if (!streamUrl && audioUrl) {
-            setUseAudioOnly(true)
+        // Unified Audio Mode Logic (Background Mode or Auto-Audio)
+        if (useAudioOnly) {
             if (audioRef.current) {
-                audioRef.current.src = audioUrl
+                // Prefer audioUrl, fallback to streamUrl if needed
+                const src = audioUrl || streamUrl
+                if (audioRef.current.src !== src) {
+                    audioRef.current.src = src
+                    audioRef.current.load()
+                }
+
+                // Seek to saved time if needed
+                if (shouldRestoreTime.current && savedTime.current > 0) {
+                    audioRef.current.currentTime = savedTime.current
+                    shouldRestoreTime.current = false
+                }
+
                 audioRef.current.play().catch(e => { if (e.name !== 'NotAllowedError') console.error(e) })
             }
             return
@@ -283,7 +301,8 @@ function VideoPlayer({ videoInfo, audioUrl, onEnded, initialTime = 0, onTimeUpda
                 hlsRef.current = null
             }
         }
-    }, [videoInfo, audioUrl, getStreamUrl])
+
+    }, [videoInfo, audioUrl, getStreamUrl, useAudioOnly])
 
     // Update playback state
     useEffect(() => {
@@ -352,7 +371,11 @@ function VideoPlayer({ videoInfo, audioUrl, onEnded, initialTime = 0, onTimeUpda
     useEffect(() => {
         maxKnownDuration.current = 0
         setDuration(0)
-    }, [videoInfo?.id])
+
+        // Sync initialTime to refs when video changes (for component reuse)
+        savedTime.current = initialTime
+        shouldRestoreTime.current = initialTime > 0
+    }, [videoInfo?.id, initialTime])
 
     const handleLoadedMetadata = (e) => {
         const d = e.target.duration
@@ -622,6 +645,38 @@ function VideoPlayer({ videoInfo, audioUrl, onEnded, initialTime = 0, onTimeUpda
                             >
                                 {isPlaying ? '⏸' : '▶'}
                             </button>
+                            {/* Toggle back to Video Mode (if available) */}
+                            {!autoAudioOnly && !externalAudioRef && (
+                                <button
+                                    onClick={(e) => {
+                                        e.stopPropagation()
+                                        // Sync time before switch
+                                        if (audioRef.current) {
+                                            savedTime.current = audioRef.current.currentTime
+                                            shouldRestoreTime.current = true
+                                        }
+                                        setBackgroundMode(false)
+                                        localStorage.setItem('backgroundMode', 'false')
+                                    }}
+                                    style={{
+                                        position: 'absolute',
+                                        top: '10px',
+                                        right: '10px',
+                                        background: 'rgba(0,0,0,0.6)',
+                                        border: '1px solid rgba(255,255,255,0.3)',
+                                        color: 'white',
+                                        padding: '8px 12px',
+                                        borderRadius: '20px',
+                                        fontSize: '12px',
+                                        cursor: 'pointer',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        gap: '6px'
+                                    }}
+                                >
+                                    📺 觀看影片
+                                </button>
+                            )}
                         </div>
                     </div>
                     <audio
@@ -631,22 +686,24 @@ function VideoPlayer({ videoInfo, audioUrl, onEnded, initialTime = 0, onTimeUpda
                         onPlay={handlePlayEvent}
                         onPause={handlePauseEvent}
                         onEnded={handleEndedEvent}
+                        autoPlay
                     />
                 </div>
             ) : (
                 // Video player with gesture support
                 <div
-                    className="video-wrapper"
-                    onClick={handleVideoClick}
+                    className="player-wrapper"
                     onTouchStart={handleTouchStart}
                     onTouchEnd={handleTouchEnd}
                     onTouchMove={handleTouchMove}
                 >
                     <video
                         ref={videoRef}
-                        className="video-element"
+                        className="react-player"
                         playsInline
                         webkit-playsinline="true"
+                        autoPlay
+                        onClick={handleVideoClick}
                         onTimeUpdate={handleTimeUpdate}
                         onLoadedMetadata={handleLoadedMetadata}
                         onPlay={handlePlayEvent}
@@ -657,6 +714,15 @@ function VideoPlayer({ videoInfo, audioUrl, onEnded, initialTime = 0, onTimeUpda
                             console.error('Video Error:', err)
                             setPlaybackError(true)
                             setIsPlaying(false)
+
+                            // Check if there are no video streams available
+                            const videoStreams = videoInfo?.streams?.filter(s => s.type === 'combined' || s.type === 'video' || s.type === 'hls')
+                            if (!videoStreams || videoStreams.length === 0) {
+                                console.log('No video streams, using audio only')
+                                setAutoAudioOnly(true)
+                            } else {
+                                setAutoAudioOnly(false)
+                            }
                         }}
                     />
 
@@ -828,6 +894,24 @@ function VideoPlayer({ videoInfo, audioUrl, onEnded, initialTime = 0, onTimeUpda
                     <svg viewBox="0 0 24 24" fill="currentColor" width="24" height="24">
                         <path d="M19.14,12.94c0.04-0.3,0.06-0.61,0.06-0.94c0-0.32-0.02-0.64-0.07-0.94l2.03-1.58c0.18-0.14,0.23-0.41,0.12-0.61 l-1.92-3.32c-0.12-0.22-0.37-0.29-0.59-0.22l-2.39,0.96c-0.5-0.38-1.03-0.7-1.62-0.94L14.4,2.81c-0.04-0.24-0.24-0.41-0.48-0.41 h-3.84c-0.24,0-0.43,0.17-0.47,0.41L9.25,5.35C8.66,5.59,8.12,5.92,7.63,6.29L5.24,5.33c-0.22-0.08-0.47,0-0.59,0.22L2.74,8.87 C2.62,9.08,2.66,9.34,2.86,9.49l2.03,1.58C4.84,11.36,4.8,11.69,4.8,12s0.02,0.64,0.07,0.94l-2.03,1.58 c-0.18,0.14-0.23,0.41-0.12,0.61l1.92,3.32c0.12,0.22,0.37,0.29,0.59,0.22l2.39-0.96c0.5,0.38,1.03,0.7,1.62,0.94l0.36,2.54 c0.05,0.24,0.24,0.41,0.48,0.41h3.84c0.24,0,0.44-0.17,0.47-0.41l0.36-2.54c0.59-0.24,1.13-0.56,1.62-0.94l2.39,0.96 c0.22,0.08,0.47,0,0.59-0.22l1.92-3.32c0.12-0.22,0.07-0.47-0.12-0.61L19.14,12.94z M12,15.6c-1.98,0-3.6-1.62-3.6-3.6 s1.62-3.6,3.6-3.6s3.6,1.62,3.6,3.6S13.98,15.6,12,15.6z" />
                     </svg>
+                </button>
+
+                {/* Background Mode Toggle (Headphones) */}
+                <button
+                    className="control-button"
+                    onClick={(e) => {
+                        e.stopPropagation()
+                        // Sync time before switch
+                        if (videoRef.current) {
+                            savedTime.current = videoRef.current.currentTime
+                            shouldRestoreTime.current = true
+                        }
+                        setBackgroundMode(true)
+                        localStorage.setItem('backgroundMode', 'true')
+                    }}
+                    title="背景模式 (省電/關螢幕播放)"
+                >
+                    <span style={{ fontSize: '18px' }}>🎧</span>
                 </button>
 
                 {/* Fullscreen Button */}

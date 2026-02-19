@@ -22,7 +22,9 @@ function Watch() {
     const [error, setError] = useState(null)
     const [playlistError, setPlaylistError] = useState(null) // New error state
     const [showPlaylistModal, setShowPlaylistModal] = useState(false)
-    const [useEmbed, setUseEmbed] = useState(true) // Default to Embed mode for better compatibility
+
+    // Feature B: Persist Player Mode (default to Embed)
+    const [useEmbed, setUseEmbed] = useState(() => localStorage.getItem('playerMode') !== 'proxy')
     const [embedError, setEmbedError] = useState(false)
     const [savedTime, setSavedTime] = useState(0)
     const youtubePlayerRef = useRef(null)
@@ -194,6 +196,18 @@ function Watch() {
                 console.log('[Watch] Info received:', info?.title)
                 setVideoInfo(info)
 
+                // Feature A: Load saved progress
+                const savedProgress = localStorage.getItem(`progress_${videoId}`)
+                if (savedProgress) {
+                    const t = parseFloat(savedProgress)
+                    if (!isNaN(t) && t > 0) {
+                        console.log(`[Watch] Resuming from ${t}s`)
+                        setSavedTime(t)
+                    }
+                } else {
+                    setSavedTime(0)
+                }
+
                 // Also get audio URL
                 try {
                     const audio = await videoApi.getAudioUrl(videoId)
@@ -241,13 +255,26 @@ function Watch() {
 
     // Stabilize the iframe URL to prevent unnecessary reloads during UI re-renders
     const embedSrc = useMemo(() => {
-        return `https://www.youtube.com/embed/${videoId}?autoplay=1&playsinline=1`
-    }, [videoId])
+        // Feature A: Resume from saved time for YouTube
+        const start = Math.floor(savedTime)
+        return `https://www.youtube.com/embed/${videoId}?autoplay=1&playsinline=1&start=${start}`
+    }, [videoId, savedTime])
 
-    // Reset player mode when video changes
+    // Feature A: Save progress every 5s (YouTube)
     useEffect(() => {
-        setUseEmbed(true)
-    }, [videoId])
+        if (!useEmbed || !videoId) return
+
+        const interval = setInterval(() => {
+            if (youtubePlayerRef.current && typeof youtubePlayerRef.current.getCurrentTime === 'function') {
+                const currentTime = youtubePlayerRef.current.getCurrentTime()
+                if (currentTime > 0) {
+                    localStorage.setItem(`progress_${videoId}`, currentTime.toString())
+                }
+            }
+        }, 5000)
+
+        return () => clearInterval(interval)
+    }, [useEmbed, videoId])
 
     // Auto-play next logic
     const handleVideoEnd = useCallback(() => {
@@ -439,7 +466,13 @@ function Watch() {
                                         audioUrl={audioUrl}
                                         onEnded={handleVideoEnd}
                                         initialTime={savedTime}
-                                        onTimeUpdate={(t) => { videoTimeRef.current = t }}
+                                        onTimeUpdate={(t) => {
+                                            videoTimeRef.current = t
+                                            // Feature A: Save progress every 5s (approx throttle)
+                                            if (Math.floor(t) % 5 === 0 && t > 0) {
+                                                localStorage.setItem(`progress_${videoId}`, t.toString())
+                                            }
+                                        }}
                                     />
                                     {/* Floating YouTube fallback link when in proxy mode */}
                                     <a
@@ -493,7 +526,11 @@ function Watch() {
                                         }
                                         console.log('[Switch] Captured time:', currentTime)
                                         setSavedTime(currentTime)
-                                        setUseEmbed(!useEmbed)
+
+                                        // Feature B: Update Player Mode Preference
+                                        const nextMode = !useEmbed
+                                        setUseEmbed(nextMode)
+                                        localStorage.setItem('playerMode', nextMode ? 'embed' : 'proxy')
                                     }}
                                     title={useEmbed ? "切換至無廣告模式 (Proxy)" : "切換至穩定模式 (Embed)"}
                                     style={{
