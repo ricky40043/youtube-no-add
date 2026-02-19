@@ -245,9 +245,6 @@ async def get_stream_url(video_id: str, quality: str = "audio"):
     if streams:
         return RedirectResponse(url=streams[0]["url"])
     
-    raise HTTPException(status_code=404, detail="No suitable stream found")
-
-
 @router.get("/audio/{video_id}")
 async def get_audio_url(video_id: str):
     """

@@ -360,6 +360,15 @@ function VideoPlayer({ videoInfo, audioUrl, onEnded, initialTime = 0, onTimeUpda
     // Event handlers
     const handleTimeUpdate = (e) => {
         const t = e.target.currentTime + startTimeOffset
+
+        // SBR Duration Fix: Force next track if playback exceeds total duration
+        // (Since we clamped the duration display, but the file might be physically longer)
+        if (useAudioOnly && duration > 0 && t > duration + 1) {
+            console.log(`[VideoPlayer] Playback time ${t.toFixed(1)} exceeded duration ${duration}. Forcing next track.`)
+            handleEndedEvent()
+            return
+        }
+
         setCurrentTime(t)
         onTimeUpdateCallback?.(t)
     }
@@ -378,7 +387,18 @@ function VideoPlayer({ videoInfo, audioUrl, onEnded, initialTime = 0, onTimeUpda
     }, [videoInfo?.id, initialTime])
 
     const handleLoadedMetadata = (e) => {
-        const d = e.target.duration
+        let d = e.target.duration
+
+        // SBR Codec Fix: If detected duration is ~2x the API duration, trust API
+        // Some AAC/MP3 files with SBR are misreported by browsers as double length
+        if (videoInfo?.duration && Number.isFinite(d)) {
+            const ratio = d / videoInfo.duration
+            if (ratio > 1.8 && ratio < 2.2) {
+                console.log(`[Player] Detected SBR double duration bug. Correcting ${d} -> ${videoInfo.duration}`)
+                d = videoInfo.duration
+            }
+        }
+
         if (Number.isFinite(d)) {
             // Logic: Only update duration if it's the longest valid time we've seen
             // This prevents "8 seconds" bug when switching to fMP4 from valid 360p
@@ -417,6 +437,16 @@ function VideoPlayer({ videoInfo, audioUrl, onEnded, initialTime = 0, onTimeUpda
     const handlePauseEvent = () => setIsPlaying(false)
     const handleEndedEvent = () => {
         console.log('[VideoPlayer] Video ended event fired.')
+
+        // Mobile Autoplay Fix: Use silence spacer to keep audio session alive
+        if (useAudioOnly && audioRef.current) {
+            // 0.1s silent MP3 (minimal size)
+            const silent = 'data:audio/mp3;base64,SUQzBAAAAAAAI1RTU0UAAAAPAAADTGF2ZjU4LjI5LjEwMAAAAAAAAAAAAAAA//OEAAAAAAAAAAAAAAAAAAAAAAAASW5mbwAAAA8AAAAEAAABIADAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMD//////////////////////////////////////////////////////////////////8AAAAATGF2YzU4LjU0AAAAAAAAAAAAAAAAJAAAAAAAAAAAASAACCQAAAAAAAAAAAD/84TBAAAAAA00AAAARAAAABwAAAAAABAAJ/wAA/wAAAAAAFdlZm10LnhtbAAAAAAAWHZuFgAAAAAABAACAAAABgAAAAcAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD/84TBAAAAAA00AAAARAAAABwAAAAAABAAJ/wAA/wAAAAAAFdlZm10LnhtbAAAAAAAWHZuFgAAAAAABAACAAAABgAAAAcAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD/84TBAAAAAA00AAAARAAAABwAAAAAABAAJ/wAA/wAAAAAAFdlZm10LnhtbAAAAAAAWHZuFgAAAAAABAACAAAABgAAAAcAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=='
+            audioRef.current.src = silent
+            audioRef.current.play().catch(console.error)
+            console.log('[VideoPlayer] Playing silence spacer to keep session alive')
+        }
+
         setIsPlaying(false)
         onEnded?.()
     }
