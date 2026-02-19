@@ -5,7 +5,7 @@ import useMediaSession from '../hooks/useMediaSession'
 // iOS detection (module-level for consistency)
 const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream
 
-function VideoPlayer({ videoInfo, audioUrl, onEnded }) {
+function VideoPlayer({ videoInfo, audioUrl, onEnded, initialTime = 0, onTimeUpdate: onTimeUpdateCallback }) {
     const videoRef = useRef(null)
     const audioRef = useRef(null)
     const hlsRef = useRef(null)
@@ -114,8 +114,8 @@ function VideoPlayer({ videoInfo, audioUrl, onEnded }) {
     // Quality State
     const [quality, setQuality] = useState('auto')
     const [availableQualities, setAvailableQualities] = useState([])
-    const shouldRestoreTime = useRef(false)
-    const savedTime = useRef(0)
+    const shouldRestoreTime = useRef(initialTime > 0)
+    const savedTime = useRef(initialTime)
 
     // Parse streams and set default quality
     useEffect(() => {
@@ -340,7 +340,9 @@ function VideoPlayer({ videoInfo, audioUrl, onEnded }) {
 
     // Event handlers
     const handleTimeUpdate = (e) => {
-        setCurrentTime(e.target.currentTime + startTimeOffset)
+        const t = e.target.currentTime + startTimeOffset
+        setCurrentTime(t)
+        onTimeUpdateCallback?.(t)
     }
 
     // Duration Persistence
@@ -374,9 +376,11 @@ function VideoPlayer({ videoInfo, audioUrl, onEnded }) {
         }
 
         if (shouldRestoreTime.current) {
+            console.log(`[Player] Restoring time to ${savedTime.current}`)
             e.target.currentTime = savedTime.current
             shouldRestoreTime.current = false
-            if (isPlaying) e.target.play().catch(e => { if (e.name !== 'NotAllowedError') console.error(e) })
+            // Always auto-play after time restore (user was watching before switching)
+            e.target.play().catch(e => { if (e.name !== 'NotAllowedError') console.error(e) })
         } else if (startTimeOffset > 0) {
             // If we just reloaded due to seek, we start at 0 (relative to new stream) which maps to startTimeOffset
             // No need to set currentTime

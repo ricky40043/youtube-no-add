@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useParams, useNavigate, useLocation } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import { formatTimeAgo } from '../utils/date'
@@ -24,9 +24,12 @@ function Watch() {
     const [showPlaylistModal, setShowPlaylistModal] = useState(false)
     const [useEmbed, setUseEmbed] = useState(true) // Default to Embed mode for better compatibility
     const [embedError, setEmbedError] = useState(false)
+    const [savedTime, setSavedTime] = useState(0)
+    const youtubePlayerRef = useRef(null)
+    const videoTimeRef = useRef(0) // Tracks proxy player time via onTimeUpdate
 
     const onPlayerReady = (event) => {
-        // access to player in all event handlers via event.target
+        youtubePlayerRef.current = event.target
     }
 
     const onPlayerError = (e) => {
@@ -48,6 +51,7 @@ function Watch() {
             autoplay: 1,
             modestbranding: 1,
             rel: 0,
+            start: Math.floor(savedTime),
         },
     }
 
@@ -434,6 +438,8 @@ function Watch() {
                                         videoInfo={videoInfo}
                                         audioUrl={audioUrl}
                                         onEnded={handleVideoEnd}
+                                        initialTime={savedTime}
+                                        onTimeUpdate={(t) => { videoTimeRef.current = t }}
                                     />
                                     {/* Floating YouTube fallback link when in proxy mode */}
                                     <a
@@ -474,7 +480,21 @@ function Watch() {
                                 {/* Switch Button */}
                                 <button
                                     className="action-button"
-                                    onClick={() => setUseEmbed(!useEmbed)}
+                                    onClick={() => {
+                                        let currentTime = 0
+                                        if (useEmbed) {
+                                            // Switching FROM YouTube → capture YouTube time
+                                            if (youtubePlayerRef.current && typeof youtubePlayerRef.current.getCurrentTime === 'function') {
+                                                currentTime = youtubePlayerRef.current.getCurrentTime()
+                                            }
+                                        } else {
+                                            // Switching FROM Proxy → capture proxy time
+                                            currentTime = videoTimeRef.current
+                                        }
+                                        console.log('[Switch] Captured time:', currentTime)
+                                        setSavedTime(currentTime)
+                                        setUseEmbed(!useEmbed)
+                                    }}
                                     title={useEmbed ? "切換至無廣告模式 (Proxy)" : "切換至穩定模式 (Embed)"}
                                     style={{
                                         background: useEmbed ? '#333' : 'var(--accent-color)',

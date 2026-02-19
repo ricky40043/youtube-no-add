@@ -1,0 +1,52 @@
+主題：實作網頁進入背景時，自動記錄 YouTube 播放時間並切換至備用播放器
+
+背景描述：
+我正在開發一個網頁應用程式，核心功能包含一個 YouTube 嵌入播放器（稱為 Player A）和一個備用的背景播放器（稱為 Player B，例如 HTML5 Audio 或自定義播放器）。
+目前 Player B 已經具備「跳轉到指定秒數並繼續播放」的功能。
+
+問題痛點：
+當使用者在手機上關閉螢幕或將瀏覽器切換到背景時，YouTube 播放器會自動暫停（這是 YouTube API 的限制）。
+
+需求規格：
+請幫我撰寫一段 JavaScript 邏輯來解決這個問題：
+
+監聽事件：使用 Page Visibility API (visibilitychange) 來偵測網頁狀態。
+
+狀態判斷：當網頁狀態變為 hidden（使用者關螢幕或切換 App）時，立即執行以下動作。
+
+獲取時間：從 YouTube Player A 取得當前的播放秒數（使用 getCurrentTime()）。
+
+無縫切換：
+
+暫停 YouTube Player A（pauseVideo()）。
+
+呼叫我現有的 Player B 函式（假設函式名稱為 switchToBackgroundPlayer(seconds)），並將剛剛取得的秒數傳入，讓它從該時間點繼續播放。
+
+技術限制與注意事項：
+
+請確保程式碼執行速度夠快，能在瀏覽器凍結背景執行緒之前完成。
+
+請提供一個封裝好的函式，例如 handleVisibilityChange()。
+
+請考慮到浮點數時間的精確度，如果需要，請取整數或保留小數點後兩位。
+
+給 Ricky 的技術補充（實作細節）
+在貼給 AI 之前，身為 Senior Engineer，有幾個坑你需要先知道，這樣 AI 寫完你才有辦法驗收或調整：
+
+瀏覽器的「Autoplay Policy」霸凌
+
+問題：現代手機瀏覽器（尤其是 iOS Safari）非常嚴格。如果網頁進到背景（hidden），這時候你才用程式碼去 play() 另一個播放器（Player B），瀏覽器可能會判定這是「未經使用者同意的自動播放」而擋下來。
+
+解法：如果 Player B 是 HTML5 <audio>，最好的做法是使用者一開始點擊播放 YouTube 時，就讓 Player B 載入並處於「靜音播放」或「暫停但在記憶體中」的狀態（Warm up），這樣切換時才不會被系統擋住。
+
+時間差 (Race Condition)
+
+從 getCurrentTime() 到啟動 Player B 會有幾毫秒的延遲。
+
+建議你在傳給 Player B 的秒數上 +0.5 或 +1 秒，這樣使用者聽起來會比較順，不會有「跳針」重複聽一句話的感覺。
+
+iOS 的凍結機制
+
+iOS 在關螢幕的瞬間，JavaScript 的執行權會被迅速收回。如果你的 switchToBackgroundPlayer 函式裡面有 fetch 或 await，可能會來不及執行。務必確保該函式是同步 (Synchronous) 執行的，或者只做最小限度的 State Update。
+
+你可以把上面的指令貼給 AI，它生成的 Code 應該會包含 document.addEventListener("visibilitychange", ...) 和 YouTube API 的整合，直接能用。
