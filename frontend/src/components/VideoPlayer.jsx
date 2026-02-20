@@ -5,7 +5,19 @@ import useMediaSession from '../hooks/useMediaSession'
 // iOS detection (module-level for consistency)
 const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream
 
-function VideoPlayer({ videoInfo, audioUrl, onEnded, initialTime = 0, onTimeUpdate: onTimeUpdateCallback, externalAudioRef }) {
+function VideoPlayer({
+    videoInfo,
+    audioUrl,
+    onEnded,
+    initialTime = 0,
+    onTimeUpdate: onTimeUpdateCallback,
+    externalAudioRef,
+    playlist = [],
+    currentVideoId,
+    isShuffle = false,
+    onNext,
+    onPrev
+}) {
     const videoRef = useRef(null)
     const audioRef = useRef(null)
     const hlsRef = useRef(null)
@@ -1377,6 +1389,141 @@ function VideoPlayer({ videoInfo, audioUrl, onEnded, initialTime = 0, onTimeUpda
         }
 
       `}</style>
+            {/* Navigation Overlays (Desktop Hover / Mobile Visible?) */}
+            {/* Left - Prev */}
+            {onPrev && (
+                <div
+                    className="nav-overlay left"
+                    onClick={(e) => { e.stopPropagation(); onPrev() }}
+                >
+                    <svg viewBox="0 0 24 24" fill="white" width="32" height="32">
+                        <path d="M11 18V6l-8.5 6 8.5 6zm.5-6l8.5 6V6l-8.5 6z" />
+                    </svg>
+                </div>
+            )}
+
+            {/* Right - Next */}
+            {onNext && (
+                <div
+                    className="nav-overlay right"
+                    onClick={(e) => { e.stopPropagation(); onNext() }}
+                >
+                    <svg viewBox="0 0 24 24" fill="white" width="32" height="32">
+                        <path d="M4 18l8.5-6L4 6v12zm9-12v12l8.5-6L13 6z" />
+                    </svg>
+                </div>
+            )}
+
+            <style>{`
+                .nav-overlay {
+                    position: absolute;
+                    top: 50%;
+                    transform: translateY(-50%);
+                    width: 50px;
+                    height: 50px;
+                    background: rgba(0,0,0,0.4);
+                    border-radius: 50%;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    cursor: pointer;
+                    z-index: 25;
+                    opacity: 0;
+                    transition: all 0.2s;
+                    backdrop-filter: blur(2px);
+                }
+                /* Show on hover for desktop */
+                .player-wrapper:hover .nav-overlay {
+                    opacity: 1;
+                }
+                /* Always show a bit on mobile? OR rely on tap? */
+                /* Let's keep it clean: fade in when controls shown? */
+                /* For now, hover logic works for mouse. Mobile might need explicit tap or always visible */
+                
+                @media (hover: none) {
+                   .nav-overlay {
+                       background: rgba(0,0,0,0.2);
+                       opacity: 0.6; /* Always visible on touch devices */
+                   }
+                }
+
+                .nav-overlay:hover {
+                    background: rgba(0,0,0,0.7);
+                    transform: translateY(-50%) scale(1.1);
+                }
+                .nav-overlay:active {
+                    transform: translateY(-50%) scale(0.9);
+                }
+
+                .nav-overlay.left { left: 20px; }
+                .nav-overlay.right { right: 20px; }
+            `}</style>
+            {/* Navigation Overlays (Desktop Hover / Mobile Visible?) */}
+            {/* Left - Prev */}
+            {onPrev && (
+                <div
+                    className="nav-overlay left"
+                    onClick={(e) => { e.stopPropagation(); onPrev() }}
+                >
+                    <svg viewBox="0 0 24 24" fill="white" width="32" height="32">
+                        <path d="M11 18V6l-8.5 6 8.5 6zm.5-6l8.5 6V6l-8.5 6z" />
+                    </svg>
+                </div>
+            )}
+
+            {/* Right - Next */}
+            {onNext && (
+                <div
+                    className="nav-overlay right"
+                    onClick={(e) => { e.stopPropagation(); onNext() }}
+                >
+                    <svg viewBox="0 0 24 24" fill="white" width="32" height="32">
+                        <path d="M4 18l8.5-6L4 6v12zm9-12v12l8.5-6L13 6z" />
+                    </svg>
+                </div>
+            )}
+
+            <style>{`
+                .nav-overlay {
+                    position: absolute;
+                    top: 50%;
+                    transform: translateY(-50%);
+                    width: 50px;
+                    height: 50px;
+                    background: rgba(0,0,0,0.4);
+                    border-radius: 50%;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    cursor: pointer;
+                    z-index: 25;
+                    opacity: 0;
+                    transition: all 0.2s;
+                    backdrop-filter: blur(2px);
+                }
+                /* Show on hover for desktop */
+                .player-wrapper:hover .nav-overlay {
+                    opacity: 1;
+                }
+                
+                @media (hover: none) {
+                   .nav-overlay {
+                       background: rgba(0,0,0,0.2);
+                       opacity: 0.6; /* Always visible on touch devices */
+                   }
+                }
+
+                .nav-overlay:hover {
+                    background: rgba(0,0,0,0.7);
+                    transform: translateY(-50%) scale(1.1);
+                }
+                .nav-overlay:active {
+                    transform: translateY(-50%) scale(0.9);
+                }
+
+                .nav-overlay.left { left: 20px; }
+                .nav-overlay.right { right: 20px; }
+            `}</style>
         </div>
     )
 }

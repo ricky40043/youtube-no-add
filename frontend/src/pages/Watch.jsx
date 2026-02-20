@@ -289,44 +289,35 @@ function Watch() {
                 }
             }
         }, 5000)
-
         return () => clearInterval(interval)
     }, [useEmbed, videoId])
 
     // Auto-play next logic
-    const handleVideoEnd = useCallback(() => {
-        console.log('[Watch] Video ended. Clearing progress & Checking auto-play...')
-
-        // Fix: Clear progress on end to prevent loop
-        localStorage.removeItem(`progress_${videoId}`)
-
-        // Priority 1: Playlist
+    // Navigation Logic
+    const goToNextVideo = useCallback(() => {
         if (playlistItems.length > 0) {
             let nextIndex
             if (isShuffle) {
-                // Find current in shuffled list
                 const currentShufflePos = shuffledIndices.findIndex(idx =>
                     playlistItems[idx]?.video_id === videoId
                 )
                 if (currentShufflePos !== -1 && currentShufflePos < shuffledIndices.length - 1) {
                     nextIndex = shuffledIndices[currentShufflePos + 1]
                 } else {
-                    nextIndex = shuffledIndices[0]
+                    nextIndex = shuffledIndices[0] // Loop to start
                 }
             } else {
-                // Sequential
                 const currentPos = playlistItems.findIndex(item => item.video_id === videoId)
                 if (currentPos !== -1 && currentPos < playlistItems.length - 1) {
                     nextIndex = currentPos + 1
                 } else {
-                    nextIndex = 0
+                    nextIndex = 0 // Loop to start
                 }
             }
 
             if (nextIndex !== undefined && playlistItems[nextIndex]) {
-                console.log('[Watch] Auto-playing NEXT in playlist:', nextIndex)
+                console.log('[Watch] Going to NEXT:', nextIndex)
                 navigate(`/watch/${playlistItems[nextIndex].video_id}?list=${playlistId}&index=${nextIndex}`)
-                return
             }
         }
 
@@ -340,6 +331,45 @@ function Watch() {
         console.log('[Watch] No next video to play.')
         console.log('[Watch] No next video to play.')
     }, [playlistItems, videoId, playlistId, isShuffle, shuffledIndices, relatedVideos, navigate])
+
+    const goToPrevVideo = useCallback(() => {
+        if (playlistItems.length > 0) {
+            let prevIndex
+            if (isShuffle) {
+                const currentShufflePos = shuffledIndices.findIndex(idx =>
+                    playlistItems[idx]?.video_id === videoId
+                )
+                if (currentShufflePos !== -1 && currentShufflePos > 0) {
+                    prevIndex = shuffledIndices[currentShufflePos - 1]
+                } else {
+                    prevIndex = shuffledIndices[shuffledIndices.length - 1] // Loop to end
+                }
+            } else {
+                const currentPos = playlistItems.findIndex(item => item.video_id === videoId)
+                if (currentPos !== -1 && currentPos > 0) {
+                    prevIndex = currentPos - 1
+                } else {
+                    prevIndex = playlistItems.length - 1 // Loop to end
+                }
+            }
+
+            if (prevIndex !== undefined && playlistItems[prevIndex]) {
+                console.log('[Watch] Going to PREV:', prevIndex)
+                navigate(`/watch/${playlistItems[prevIndex].video_id}?list=${playlistId}&index=${prevIndex}`)
+            }
+        }
+    }, [playlistItems, videoId, playlistId, isShuffle, shuffledIndices, navigate])
+
+    // Auto-play next logic
+    const handleVideoEnd = useCallback(() => {
+        console.log('[Watch] Video ended. Clearing progress & Checking auto-play...')
+
+        // Fix: Clear progress on end to prevent loop
+        localStorage.removeItem(`progress_${videoId}`)
+
+        // Use unified next logic
+        goToNextVideo()
+    }, [videoId, goToNextVideo])
 
     // Auto-skip on error in playlist mode
     useEffect(() => {
@@ -489,6 +519,8 @@ function Watch() {
                                         onToggleShuffle={() => setIsShuffle(!isShuffle)}
                                         playlist={playlistItems}
                                         currentVideoId={videoId}
+                                        onNext={goToNextVideo}
+                                        onPrev={goToPrevVideo}
                                         onTimeUpdate={(t) => {
                                             videoTimeRef.current = t
                                             // Feature A: Save progress every 5s (approx throttle)
@@ -529,6 +561,66 @@ function Watch() {
                                 </>
                             )}
                         </div>
+
+                        {/* YouTube Controls Bar (Below Player) */}
+                        {useEmbed && (
+                            <div style={{
+                                display: 'flex',
+                                justifyContent: 'space-between',
+                                alignItems: 'center',
+                                padding: '12px 16px',
+                                background: '#222',
+                                marginTop: '12px',
+                                borderRadius: '12px',
+                                border: '1px solid #333'
+                            }}>
+                                <button
+                                    onClick={goToPrevVideo}
+                                    className="control-btn-nav"
+                                    title="上一首"
+                                    disabled={!playlistId && !playlistItems.length}
+                                    style={{ opacity: (playlistId || playlistItems.length) ? 1 : 0.5 }}
+                                >
+                                    ⏮ 上一首
+                                </button>
+                                <span style={{ color: '#aaa', fontSize: '13px' }}>
+                                    {playlistId ? `播放清單: ${playlistItems.length} 首` : '無播放清單'}
+                                </span>
+                                <button
+                                    onClick={goToNextVideo}
+                                    className="control-btn-nav"
+                                    title="下一首"
+                                >
+                                    下一首 ⏭
+                                </button>
+                                <style>{`
+                                    .control-btn-nav {
+                                        background: #333;
+                                        border: 1px solid #444;
+                                        color: #ddd;
+                                        padding: 8px 10px;
+                                        min-width: 100px;
+                                        border-radius: 8px;
+                                        cursor: pointer;
+                                        font-size: 14px;
+                                        font-weight: bold;
+                                        transition: all 0.2s;
+                                        display: flex;
+                                        align-items: center;
+                                        justify-content: center;
+                                        gap: 6px;
+                                    }
+                                    .control-btn-nav:hover {
+                                        background: #444;
+                                        border-color: #666;
+                                        color: white;
+                                    }
+                                    .control-btn-nav:active {
+                                        transform: scale(0.96);
+                                    }
+                                `}</style>
+                            </div>
+                        )}
 
                         <div className="video-details">
                             <h1>{videoInfo?.title}</h1>
