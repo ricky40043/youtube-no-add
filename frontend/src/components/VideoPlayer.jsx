@@ -689,38 +689,8 @@ function VideoPlayer({
                             >
                                 {isPlaying ? '⏸' : '▶'}
                             </button>
-                            {/* Toggle back to Video Mode (if available) */}
-                            {!autoAudioOnly && !externalAudioRef && (
-                                <button
-                                    onClick={(e) => {
-                                        e.stopPropagation()
-                                        // Sync time before switch
-                                        if (audioRef.current) {
-                                            savedTime.current = audioRef.current.currentTime
-                                            shouldRestoreTime.current = true
-                                        }
-                                        setBackgroundMode(false)
-                                        localStorage.setItem('backgroundMode', 'false')
-                                    }}
-                                    style={{
-                                        position: 'absolute',
-                                        top: '10px',
-                                        right: '10px',
-                                        background: 'rgba(0,0,0,0.6)',
-                                        border: '1px solid rgba(255,255,255,0.3)',
-                                        color: 'white',
-                                        padding: '8px 12px',
-                                        borderRadius: '20px',
-                                        fontSize: '12px',
-                                        cursor: 'pointer',
-                                        display: 'flex',
-                                        alignItems: 'center',
-                                        gap: '6px'
-                                    }}
-                                >
-                                    📺 觀看影片
-                                </button>
-                            )}
+                            {/* Toggle back to Video Mode (Removed as per user request, moved to bottom bar) */}
+                            {/* !autoAudioOnly && !externalAudioRef && ( ... ) */}
                         </div>
                     </div>
                     <audio
@@ -940,23 +910,40 @@ function VideoPlayer({
                     </svg>
                 </button>
 
-                {/* Background Mode Toggle (Headphones) */}
-                <button
-                    className="control-button"
-                    onClick={(e) => {
-                        e.stopPropagation()
-                        // Sync time before switch
-                        if (videoRef.current) {
-                            savedTime.current = videoRef.current.currentTime
-                            shouldRestoreTime.current = true
-                        }
-                        setBackgroundMode(true)
-                        localStorage.setItem('backgroundMode', 'true')
-                    }}
-                    title="背景模式 (省電/關螢幕播放)"
-                >
-                    <span style={{ fontSize: '18px' }}>🎧</span>
-                </button>
+                {/* Background Mode Toggle (Headphones / TV) */}
+                {!autoAudioOnly && !externalAudioRef && (
+                    <button
+                        className="control-button"
+                        onClick={(e) => {
+                            e.stopPropagation()
+
+                            if (useAudioOnly) {
+                                // Switch TO Video
+                                if (audioRef.current) {
+                                    savedTime.current = audioRef.current.currentTime
+                                    shouldRestoreTime.current = true
+                                }
+                                setBackgroundMode(false)
+                                localStorage.setItem('backgroundMode', 'false')
+                            } else {
+                                // Switch TO Audio
+                                if (videoRef.current) {
+                                    savedTime.current = videoRef.current.currentTime
+                                    shouldRestoreTime.current = true
+                                }
+                                setBackgroundMode(true)
+                                localStorage.setItem('backgroundMode', 'true')
+                            }
+                        }}
+                        title={useAudioOnly ? "切換至影片模式" : "背景模式 (省電/關螢幕播放)"}
+                    >
+                        {useAudioOnly ? (
+                            <span style={{ fontSize: '18px' }}>📺</span>
+                        ) : (
+                            <span style={{ fontSize: '18px' }}>🎧</span>
+                        )}
+                    </button>
+                )}
 
                 {/* Fullscreen Button */}
                 <button
