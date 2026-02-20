@@ -199,10 +199,26 @@ function Watch() {
                 // Feature A: Load saved progress
                 const savedProgress = localStorage.getItem(`progress_${videoId}`)
                 if (savedProgress) {
-                    const t = parseFloat(savedProgress)
-                    if (!isNaN(t) && t > 0) {
-                        console.log(`[Watch] Resuming from ${t}s`)
-                        setSavedTime(t)
+                    try {
+                        // Try parsing new JSON format
+                        const data = JSON.parse(savedProgress)
+                        // Check if expired (24 hours)
+                        if (Date.now() - data.timestamp < 24 * 60 * 60 * 1000) {
+                            console.log(`[Watch] Resuming from ${data.time}s`)
+                            setSavedTime(data.time)
+                        } else {
+                            console.log('[Watch] Progress expired, starting from 0')
+                            setSavedTime(0)
+                        }
+                    } catch (e) {
+                        // Fallback for legacy format (just time string)
+                        const t = parseFloat(savedProgress)
+                        if (!isNaN(t) && t > 0) {
+                            console.log(`[Watch] Resuming from ${t}s (Legacy)`)
+                            setSavedTime(t)
+                        } else {
+                            setSavedTime(0)
+                        }
                     }
                 } else {
                     setSavedTime(0)
@@ -268,7 +284,8 @@ function Watch() {
             if (youtubePlayerRef.current && typeof youtubePlayerRef.current.getCurrentTime === 'function') {
                 const currentTime = youtubePlayerRef.current.getCurrentTime()
                 if (currentTime > 0) {
-                    localStorage.setItem(`progress_${videoId}`, currentTime.toString())
+                    const data = { time: currentTime, timestamp: Date.now() }
+                    localStorage.setItem(`progress_${videoId}`, JSON.stringify(data))
                 }
             }
         }, 5000)
@@ -278,7 +295,10 @@ function Watch() {
 
     // Auto-play next logic
     const handleVideoEnd = useCallback(() => {
-        console.log('[Watch] Video ended. Checking auto-play...')
+        console.log('[Watch] Video ended. Clearing progress & Checking auto-play...')
+
+        // Fix: Clear progress on end to prevent loop
+        localStorage.removeItem(`progress_${videoId}`)
 
         // Priority 1: Playlist
         if (playlistItems.length > 0) {
@@ -473,7 +493,8 @@ function Watch() {
                                             videoTimeRef.current = t
                                             // Feature A: Save progress every 5s (approx throttle)
                                             if (Math.floor(t) % 5 === 0 && t > 0) {
-                                                localStorage.setItem(`progress_${videoId}`, t.toString())
+                                                const data = { time: t, timestamp: Date.now() }
+                                                localStorage.setItem(`progress_${videoId}`, JSON.stringify(data))
                                             }
                                         }}
                                     />
