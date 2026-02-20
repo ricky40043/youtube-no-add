@@ -392,7 +392,32 @@ function Watch() {
         }
     }, [videoInfo?.title])
 
-    if (loading) {
+    if (loading && !videoInfo) {
+        // If fake lock screen is active, keep the loading screen pitch black to prevent OLED flashes
+        if (localStorage.getItem('fakeLockScreen') === 'true') {
+            return (
+                <div style={{
+                    position: 'fixed',
+                    inset: 0,
+                    backgroundColor: '#000000',
+                    zIndex: 999999,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center'
+                }}>
+                    <div style={{
+                        width: '30px',
+                        height: '30px',
+                        border: '2px solid rgba(255,255,255,0.05)',
+                        borderTopColor: '#333',
+                        borderRadius: '50%',
+                        animation: 'spin 1s linear infinite'
+                    }}></div>
+                    <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+                </div>
+            )
+        }
+
         return (
             <div className="loading-container" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '80vh' }}>
                 <img src="/logo.svg" className="loading-logo" alt="Loading..." />
@@ -440,6 +465,29 @@ function Watch() {
             animate={{ opacity: 1 }}
             transition={{ duration: 0.3 }}
         >
+            {/* Full-screen loading overlay when navigating between videos to keep player mounted */}
+            {loading && videoInfo && (
+                <div style={{
+                    position: 'fixed',
+                    inset: 0,
+                    backgroundColor: localStorage.getItem('fakeLockScreen') === 'true' ? '#000000' : 'rgba(0,0,0,0.8)',
+                    zIndex: 999999,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center'
+                }}>
+                    <div style={{
+                        width: '30px',
+                        height: '30px',
+                        border: `2px solid ${localStorage.getItem('fakeLockScreen') === 'true' ? 'rgba(255,255,255,0.05)' : 'rgba(255,255,255,0.2)'}`,
+                        borderTopColor: localStorage.getItem('fakeLockScreen') === 'true' ? '#333' : '#fff',
+                        borderRadius: '50%',
+                        animation: 'spin 1s linear infinite'
+                    }}></div>
+                    <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+                </div>
+            )}
+
             <div className="watch-container">
                 <div className="main-content">
                     <div className="player-section">
@@ -507,12 +555,14 @@ function Watch() {
                                                 🔄 切換播放器
                                             </button>
                                         </div>
+
                                     )}
                                 </div>
                             ) : (
                                 <>
                                     <VideoPlayer
                                         videoInfo={videoInfo}
+                                        isLoading={loading}
                                         onEnded={handleVideoEnd}
                                         initialTime={savedTime}
                                         isShuffle={isShuffle}
@@ -521,6 +571,13 @@ function Watch() {
                                         currentVideoId={videoId}
                                         onNext={goToNextVideo}
                                         onPrev={goToPrevVideo}
+                                        onSwitchToYouTube={(capturedTime) => {
+                                            console.log('[Switch] TV Icon clicked, switching to YouTube Embed. Time:', capturedTime)
+                                            setSavedTime(capturedTime || 0)
+                                            localStorage.setItem('backgroundMode', 'false')
+                                            localStorage.setItem('playerMode', 'embed')
+                                            setUseEmbed(true)
+                                        }}
                                         onTimeUpdate={(t) => {
                                             videoTimeRef.current = t
                                             // Feature A: Save progress every 5s (approx throttle)
@@ -626,42 +683,30 @@ function Watch() {
                             <h1>{videoInfo?.title}</h1>
 
                             <div className="video-actions">
-                                {/* Switch Button */}
-                                <button
-                                    className="action-button"
-                                    onClick={() => {
-                                        let currentTime = 0
-                                        if (useEmbed) {
-                                            // Switching FROM YouTube → capture YouTube time
-                                            if (youtubePlayerRef.current && typeof youtubePlayerRef.current.getCurrentTime === 'function') {
-                                                currentTime = youtubePlayerRef.current.getCurrentTime()
-                                            }
-                                        } else {
-                                            // Switching FROM Proxy → capture proxy time
-                                            currentTime = videoTimeRef.current
-                                        }
-                                        console.log('[Switch] Captured time:', currentTime)
-                                        setSavedTime(currentTime)
+                                {/* Switch back to YouTube Button (Only visible when NOT in YouTube mode) */}
+                                {!useEmbed && (
+                                    <button
+                                        className="action-button"
+                                        onClick={() => {
+                                            setSavedTime(videoTimeRef.current)
+                                            localStorage.setItem('backgroundMode', 'false')
+                                            localStorage.setItem('playerMode', 'embed')
+                                            setUseEmbed(true)
+                                        }}
+                                        title="切換至 YouTube 原生播放器"
+                                        style={{
+                                            background: 'var(--accent-color)',
+                                            color: '#fff',
+                                            border: '1px solid rgba(255,255,255,0.2)',
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            gap: '6px'
+                                        }}
+                                    >
+                                        📺 切換回 YouTube
+                                    </button>
+                                )}
 
-                                        // Feature B: Update Player Mode Preference
-                                        const nextMode = !useEmbed
-                                        setUseEmbed(nextMode)
-                                        localStorage.setItem('playerMode', nextMode ? 'embed' : 'proxy')
-                                    }}
-                                    title={useEmbed ? "切換至無廣告模式 (Proxy)" : "切換至穩定模式 (Embed)"}
-                                    style={{
-                                        background: useEmbed ? '#333' : 'var(--accent-color)',
-                                        color: '#fff',
-                                        border: '1px solid rgba(255,255,255,0.2)',
-                                        display: 'flex',
-                                        alignItems: 'center',
-                                        gap: '6px'
-                                    }}
-                                >
-                                    {useEmbed ? '🌐 切換播放器' : '📺 切換回 YouTube'}
-                                </button>
-
-                                {/* Direct Audio Mode Switch (Only visible in YouTube mode) */}
                                 {useEmbed && (
                                     <button
                                         className="action-button"
@@ -692,9 +737,53 @@ function Watch() {
                                             marginLeft: '8px'
                                         }}
                                     >
-                                        🎧 切換純聽歌
+                                        🎧 切換純音樂
                                     </button>
                                 )}
+
+                                {/* Fake Lock Screen Button (Always visible) */}
+                                <button
+                                    className="action-button lock-screen-btn"
+                                    onClick={() => {
+                                        if (useEmbed) {
+                                            // Capture Time from YouTube
+                                            let currentTime = 0
+                                            if (youtubePlayerRef.current && typeof youtubePlayerRef.current.getCurrentTime === 'function') {
+                                                currentTime = youtubePlayerRef.current.getCurrentTime()
+                                            }
+                                            setSavedTime(currentTime)
+                                            // Force Audio Mode
+                                            localStorage.setItem('backgroundMode', 'true')
+                                            // Switch to Proxy Player
+                                            setUseEmbed(false)
+                                            localStorage.setItem('playerMode', 'proxy')
+
+                                            // Wait for Proxy Player to mount then trigger lock screen
+                                            setTimeout(() => {
+                                                window.dispatchEvent(new CustomEvent('triggerFakeLockScreen'))
+                                            }, 100)
+                                        } else {
+                                            window.dispatchEvent(new CustomEvent('triggerFakeLockScreen'))
+                                        }
+                                    }}
+                                    title="啟動 OELD 隱藏畫面"
+                                    style={{
+                                        background: '#111',
+                                        color: '#fff',
+                                        border: '1px solid #555',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        gap: '6px',
+                                        marginLeft: useEmbed ? '0' : '8px'
+                                    }}
+                                >
+                                    <img
+                                        src="https://api.iconify.design/material-symbols-light/background-replace-rounded.svg?color=white"
+                                        alt="Fake Lock Screen Icon"
+                                        style={{ width: '18px', height: '18px' }}
+                                    />
+                                    假背景播放
+                                </button>
 
                                 {playlistId && (
                                     <button

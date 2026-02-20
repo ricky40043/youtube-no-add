@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
+import { createPortal } from 'react-dom'
 import Hls from 'hls.js'
 import useMediaSession from '../hooks/useMediaSession'
 
@@ -8,9 +9,11 @@ const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream
 function VideoPlayer({
     videoInfo,
     audioUrl,
+    isLoading = false,
     onEnded,
     initialTime = 0,
     onTimeUpdate: onTimeUpdateCallback,
+    onSwitchToYouTube,
     externalAudioRef,
     playlist = [],
     currentVideoId,
@@ -39,6 +42,13 @@ function VideoPlayer({
     const [isFullscreen, setIsFullscreen] = useState(false)
     const [startTimeOffset, setStartTimeOffset] = useState(0) // Track offset for proxy seeking
     const [playbackError, setPlaybackError] = useState(false) // Track playback errors for iOS switch button
+
+    // Fake Lock Screen States
+    const [isFakeLockScreen, setIsFakeLockScreen] = useState(() => localStorage.getItem('fakeLockScreen') === 'true')
+    const [clockTime, setClockTime] = useState('')
+    const [burnInOffset, setBurnInOffset] = useState({ x: 0, y: 0 })
+    const wakeLockRef = useRef(null)
+    const lockScreenTapTimeRef = useRef(0)
 
     // Gesture refs
     const lastTapTime = useRef(0)
@@ -247,6 +257,13 @@ function VideoPlayer({
         // Clear previous error
         setPlaybackError(false)
 
+        // If loading next video, ensure current video pauses
+        if (isLoading) {
+            if (useAudioOnly && audioRef.current) audioRef.current.pause()
+            if (!useAudioOnly && videoRef.current) videoRef.current.pause()
+            return
+        }
+
         // Unified Audio Mode Logic (Background Mode or Auto-Audio)
         if (useAudioOnly) {
             if (audioRef.current) {
@@ -315,7 +332,7 @@ function VideoPlayer({
             }
         }
 
-    }, [videoInfo, audioUrl, getStreamUrl, useAudioOnly])
+    }, [videoInfo, audioUrl, getStreamUrl, useAudioOnly, isLoading])
 
     // Update playback state
     useEffect(() => {
@@ -598,6 +615,148 @@ function VideoPlayer({
         }
     }
 
+    // Fake Lock Screen Handlers
+    const enableFakeLockScreen = async () => {
+        try {
+            // 1. Request Wake Lock
+            if ('wakeLock' in navigator) {
+                wakeLockRef.current = await navigator.wakeLock.request('screen')
+            }
+            // 2. Request Fullscreen
+            const container = document.querySelector('.player-container')
+            if (container?.requestFullscreen) {
+                await container.requestFullscreen()
+            } else if (container?.webkitRequestFullscreen) {
+                await container.webkitRequestFullscreen()
+            }
+            // 3. Set State
+            setIsFakeLockScreen(true)
+            localStorage.setItem('fakeLockScreen', 'true')
+            setShowSettings(false)
+            // 4. Auto-play if paused
+            if (!isPlaying) {
+                handlePlay()
+            }
+        } catch (err) {
+            console.error('Failed to enable fake lock screen:', err)
+            // Even if fullscreen or wakelock fails (e.g. old iOS), we still show the black screen UI
+            setIsFakeLockScreen(true)
+            localStorage.setItem('fakeLockScreen', 'true')
+            setShowSettings(false)
+            if (!isPlaying) {
+                handlePlay()
+            }
+        }
+    }
+
+    const disableFakeLockScreen = async () => {
+        try {
+            // 1. Release Wake Lock
+            if (wakeLockRef.current) {
+                await wakeLockRef.current.release()
+                wakeLockRef.current = null
+            }
+            // 2. Exit Fullscreen (only if we are currently fullscreen)
+            if (document.fullscreenElement || document.webkitFullscreenElement) {
+                if (document.exitFullscreen) {
+                    await document.exitFullscreen()
+                } else if (document.webkitExitFullscreen) {
+                    await document.webkitExitFullscreen()
+                }
+            }
+        } catch (err) {
+            console.error('Failed to disable fake lock screen:', err)
+        } finally {
+            // 3. Set State
+            setIsFakeLockScreen(false)
+            localStorage.setItem('fakeLockScreen', 'false')
+            lockScreenTapTimeRef.current = 0
+        }
+    }
+
+    const handleLockScreenTouchStart = (e) => {
+        // Prevent default to avoid any native double-tap zoom
+        e.preventDefault()
+    }
+
+    const handleLockScreenTouchEnd = (e) => {
+        e.preventDefault() // Block default clicks
+        const now = Date.now()
+
+        if (now - lockScreenTapTimeRef.current < 300) {
+            // Double Tap Detected
+            disableFakeLockScreen()
+            lockScreenTapTimeRef.current = 0
+        } else {
+            // Single Tap
+            lockScreenTapTimeRef.current = now
+        }
+    }
+
+    // Fake Lock Screen Clock & Burn-in Protection
+    useEffect(() => {
+        if (!isFakeLockScreen) return
+
+        const updateClock = () => {
+            const now = new Date()
+            const hours = String(now.getHours()).padStart(2, '0')
+            const minutes = String(now.getMinutes()).padStart(2, '0')
+            setClockTime(`${hours}:${minutes}`)
+        }
+
+        const updateBurnInOffset = () => {
+            // Random offset between -5px and 5px
+            setBurnInOffset({
+                x: Math.floor(Math.random() * 11) - 5,
+                y: Math.floor(Math.random() * 11) - 5
+            })
+        }
+
+        updateClock() // Initial update
+        const clockInterval = setInterval(updateClock, 1000)
+        const burnInInterval = setInterval(updateBurnInOffset, 60000) // Every minute
+
+        // Attempt to request locks safely when re-mounted in lock screen mode
+        const attemptLocks = async () => {
+            try {
+                if ('wakeLock' in navigator && !wakeLockRef.current) {
+                    wakeLockRef.current = await navigator.wakeLock.request('screen').catch(() => null)
+                }
+                const container = document.querySelector('.player-container')
+                if (container?.requestFullscreen && !document.fullscreenElement) {
+                    await container.requestFullscreen().catch(() => null)
+                }
+            } catch (e) {
+                // Ignore auto-lock errors (requires user interaction)
+            }
+        }
+        attemptLocks()
+
+        return () => {
+            clearInterval(clockInterval)
+            clearInterval(burnInInterval)
+        }
+    }, [isFakeLockScreen])
+
+    // Cleanup Wake Lock on unmount just in case
+    useEffect(() => {
+        return () => {
+            if (wakeLockRef.current) {
+                wakeLockRef.current.release().catch(console.error)
+            }
+        }
+    }, [])
+
+    // Listen for external trigger (e.g., from Watch.jsx)
+    useEffect(() => {
+        const handleTrigger = () => {
+            enableFakeLockScreen()
+        }
+        window.addEventListener('triggerFakeLockScreen', handleTrigger)
+        return () => window.removeEventListener('triggerFakeLockScreen', handleTrigger)
+    }, [])
+
+
     const handleTouchEnd = (e) => {
         // Only prevent default if we handled a gesture to strictly avoid ghost clicks
         // But for double tap logic, we usually want to block default click handling
@@ -689,8 +848,6 @@ function VideoPlayer({
                             >
                                 {isPlaying ? '⏸' : '▶'}
                             </button>
-                            {/* Toggle back to Video Mode (Removed as per user request, moved to bottom bar) */}
-                            {/* !autoAudioOnly && !externalAudioRef && ( ... ) */}
                         </div>
                     </div>
                     <audio
@@ -853,6 +1010,28 @@ function VideoPlayer({
                 </div>
             )}
 
+            {/* Fake Lock Screen Overlay (Portaled to document.body) */}
+            {isFakeLockScreen && createPortal(
+                <div
+                    className="fake-lock-screen"
+                    onTouchStart={handleLockScreenTouchStart}
+                    onTouchEnd={handleLockScreenTouchEnd}
+                    style={{
+                        transform: `translate(${burnInOffset.x}px, ${burnInOffset.y}px)`
+                    }}
+                >
+                    <div className="lock-info">
+                        <div className="lock-title">{videoInfo?.title}</div>
+                        <div className="lock-progress">
+                            {formatTime(currentTime)} / {formatTime(duration)}
+                        </div>
+                    </div>
+
+                    <div className="lock-hint">連按兩下螢幕解鎖</div>
+                </div>,
+                document.body
+            )}
+
             {/* Dual Subtitle Overlay (Secondary) */}
             {secondarySubtitleText && (
                 <div className="subtitle-overlay secondary">
@@ -918,13 +1097,14 @@ function VideoPlayer({
                             e.stopPropagation()
 
                             if (useAudioOnly) {
-                                // Switch TO Video
+                                // Switch TO YouTube instead of local Video mode
                                 if (audioRef.current) {
                                     savedTime.current = audioRef.current.currentTime
                                     shouldRestoreTime.current = true
                                 }
-                                setBackgroundMode(false)
-                                localStorage.setItem('backgroundMode', 'false')
+                                if (onSwitchToYouTube) {
+                                    onSwitchToYouTube(savedTime.current)
+                                }
                             } else {
                                 // Switch TO Audio
                                 if (videoRef.current) {
@@ -935,10 +1115,10 @@ function VideoPlayer({
                                 localStorage.setItem('backgroundMode', 'true')
                             }
                         }}
-                        title={useAudioOnly ? "切換至影片模式" : "背景模式 (省電/關螢幕播放)"}
+                        title={useAudioOnly ? "切換至 YouTube 播放器" : "背景模式 (省電/關螢幕播放)"}
                     >
                         {useAudioOnly ? (
-                            <span style={{ fontSize: '18px' }}>📺</span>
+                            <span style={{ fontSize: '18px' }} title="切換至 YouTube">📺</span>
                         ) : (
                             <span style={{ fontSize: '18px' }}>🎧</span>
                         )}
@@ -1030,7 +1210,8 @@ function VideoPlayer({
                         </div>
                     </div>
                 </div>
-            )}
+            )
+            }
 
             <style>{`
         .player-container {
@@ -1104,9 +1285,11 @@ function VideoPlayer({
           position: absolute;
           inset: 0;
           display: flex;
+          flex-direction: column;
           align-items: center;
           justify-content: center;
-          background: rgba(0, 0, 0, 0.3);
+          gap: 16px;
+          background: rgba(0, 0, 0, 0.4);
           border-radius: 8px;
         }
         
@@ -1126,6 +1309,23 @@ function VideoPlayer({
         
         .play-button:hover {
           transform: scale(1.1);
+        }
+
+        .lock-text-btn {
+            background: rgba(0, 0, 0, 0.6);
+            color: #ddd;
+            border: 1px solid #555;
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-size: 14px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .lock-text-btn:hover {
+            background: rgba(0, 0, 0, 0.8);
+            color: #fff;
+            border-color: #777;
         }
         
         .player-controls {
@@ -1375,31 +1575,113 @@ function VideoPlayer({
              max-width: 80%;
         }
 
+        /* Fake Lock Screen Styles */
+        .fake-lock-screen {
+            position: fixed;
+            inset: 0;
+            background-color: #000000;
+            z-index: 999999;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: flex-start;
+            padding-top: 15vh;
+            font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+            color: #ffffff;
+            transition: transform 1s ease-in-out; /* Smooth burn-in shift */
+        }
+
+        .lock-icon {
+            font-size: 20px;
+            color: #666666;
+            margin-bottom: 20px;
+        }
+
+        .lock-clock {
+            font-size: 5rem;
+            font-weight: bold;
+            color: #555555; /* Much darker white/gray to save OLED power */
+            margin-bottom: 40px;
+            letter-spacing: 2px;
+        }
+
+        .lock-info {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            position: absolute;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 80%;
+            text-align: center;
+        }
+
+        .lock-title {
+            font-size: 1.2rem;
+            color: #666666; /* Darker title */
+            margin-bottom: 12px;
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .lock-progress {
+            font-size: 0.9rem;
+            color: #444444; /* Darker progress */
+        }
+
+        .lock-hint {
+            position: absolute;
+            bottom: 40px;
+            font-size: 0.8rem;
+            color: #222222; /* Very dark hint */
+            animation: breathe 2s infinite ease-in-out;
+        }
+
+        @keyframes breathe {
+            0% { opacity: 0.3; }
+            50% { opacity: 1; }
+            100% { opacity: 0.3; }
+        }
+
+        .lock-btn svg {
+            fill: #999;
+        }
+        .lock-btn:hover svg {
+            fill: #fff;
+        }
+
       `}</style>
             {/* Navigation Overlays (Desktop Hover / Mobile Visible?) */}
             {/* Left - Prev */}
-            {onPrev && (
-                <div
-                    className="nav-overlay left"
-                    onClick={(e) => { e.stopPropagation(); onPrev() }}
-                >
-                    <svg viewBox="0 0 24 24" fill="white" width="32" height="32">
-                        <path d="M11 18V6l-8.5 6 8.5 6zm.5-6l8.5 6V6l-8.5 6z" />
-                    </svg>
-                </div>
-            )}
+            {
+                onPrev && (
+                    <div
+                        className="nav-overlay left"
+                        onClick={(e) => { e.stopPropagation(); onPrev() }}
+                    >
+                        <svg viewBox="0 0 24 24" fill="white" width="32" height="32">
+                            <path d="M11 18V6l-8.5 6 8.5 6zm.5-6l8.5 6V6l-8.5 6z" />
+                        </svg>
+                    </div>
+                )
+            }
 
             {/* Right - Next */}
-            {onNext && (
-                <div
-                    className="nav-overlay right"
-                    onClick={(e) => { e.stopPropagation(); onNext() }}
-                >
-                    <svg viewBox="0 0 24 24" fill="white" width="32" height="32">
-                        <path d="M4 18l8.5-6L4 6v12zm9-12v12l8.5-6L13 6z" />
-                    </svg>
-                </div>
-            )}
+            {
+                onNext && (
+                    <div
+                        className="nav-overlay right"
+                        onClick={(e) => { e.stopPropagation(); onNext() }}
+                    >
+                        <svg viewBox="0 0 24 24" fill="white" width="32" height="32">
+                            <path d="M4 18l8.5-6L4 6v12zm9-12v12l8.5-6L13 6z" />
+                        </svg>
+                    </div>
+                )
+            }
 
             <style>{`
                 .nav-overlay {
@@ -1447,28 +1729,32 @@ function VideoPlayer({
             `}</style>
             {/* Navigation Overlays (Desktop Hover / Mobile Visible?) */}
             {/* Left - Prev */}
-            {onPrev && (
-                <div
-                    className="nav-overlay left"
-                    onClick={(e) => { e.stopPropagation(); onPrev() }}
-                >
-                    <svg viewBox="0 0 24 24" fill="white" width="32" height="32">
-                        <path d="M11 18V6l-8.5 6 8.5 6zm.5-6l8.5 6V6l-8.5 6z" />
-                    </svg>
-                </div>
-            )}
+            {
+                onPrev && (
+                    <div
+                        className="nav-overlay left"
+                        onClick={(e) => { e.stopPropagation(); onPrev() }}
+                    >
+                        <svg viewBox="0 0 24 24" fill="white" width="32" height="32">
+                            <path d="M11 18V6l-8.5 6 8.5 6zm.5-6l8.5 6V6l-8.5 6z" />
+                        </svg>
+                    </div>
+                )
+            }
 
             {/* Right - Next */}
-            {onNext && (
-                <div
-                    className="nav-overlay right"
-                    onClick={(e) => { e.stopPropagation(); onNext() }}
-                >
-                    <svg viewBox="0 0 24 24" fill="white" width="32" height="32">
-                        <path d="M4 18l8.5-6L4 6v12zm9-12v12l8.5-6L13 6z" />
-                    </svg>
-                </div>
-            )}
+            {
+                onNext && (
+                    <div
+                        className="nav-overlay right"
+                        onClick={(e) => { e.stopPropagation(); onNext() }}
+                    >
+                        <svg viewBox="0 0 24 24" fill="white" width="32" height="32">
+                            <path d="M4 18l8.5-6L4 6v12zm9-12v12l8.5-6L13 6z" />
+                        </svg>
+                    </div>
+                )
+            }
 
             <style>{`
                 .nav-overlay {
@@ -1511,7 +1797,7 @@ function VideoPlayer({
                 .nav-overlay.left { left: 20px; }
                 .nav-overlay.right { right: 20px; }
             `}</style>
-        </div>
+        </div >
     )
 }
 
