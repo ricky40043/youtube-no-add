@@ -463,9 +463,12 @@ function Watch() {
                                 <>
                                     <VideoPlayer
                                         videoInfo={videoInfo}
-                                        audioUrl={audioUrl}
                                         onEnded={handleVideoEnd}
                                         initialTime={savedTime}
+                                        isShuffle={isShuffle}
+                                        onToggleShuffle={() => setIsShuffle(!isShuffle)}
+                                        playlist={playlistItems}
+                                        currentVideoId={videoId}
                                         onTimeUpdate={(t) => {
                                             videoTimeRef.current = t
                                             // Feature A: Save progress every 5s (approx throttle)
@@ -544,6 +547,41 @@ function Watch() {
                                 >
                                     {useEmbed ? '🌐 切換播放器' : '📺 切換回 YouTube'}
                                 </button>
+
+                                {/* Direct Audio Mode Switch (Only visible in YouTube mode) */}
+                                {useEmbed && (
+                                    <button
+                                        className="action-button"
+                                        onClick={() => {
+                                            // Capture Time from YouTube
+                                            let currentTime = 0
+                                            if (youtubePlayerRef.current && typeof youtubePlayerRef.current.getCurrentTime === 'function') {
+                                                currentTime = youtubePlayerRef.current.getCurrentTime()
+                                            }
+                                            console.log('[Switch] Audio Mode. Time:', currentTime)
+                                            setSavedTime(currentTime)
+
+                                            // Force Audio Mode
+                                            localStorage.setItem('backgroundMode', 'true')
+
+                                            // Switch to Proxy Player
+                                            setUseEmbed(false)
+                                            localStorage.setItem('playerMode', 'proxy')
+                                        }}
+                                        title="切換至耳機模式 (背景播放)"
+                                        style={{
+                                            background: '#4CAF50',
+                                            color: '#fff',
+                                            border: '1px solid rgba(255,255,255,0.2)',
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            gap: '6px',
+                                            marginLeft: '8px'
+                                        }}
+                                    >
+                                        🎧 切換純聽歌
+                                    </button>
+                                )}
 
                                 {playlistId && (
                                     <button
