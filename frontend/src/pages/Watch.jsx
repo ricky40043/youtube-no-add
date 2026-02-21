@@ -587,34 +587,6 @@ function Watch() {
                                             }
                                         }}
                                     />
-                                    {/* Floating YouTube fallback link when in proxy mode */}
-                                    <a
-                                        href={`https://www.youtube.com/watch?v=${videoId}`}
-                                        target="_blank"
-                                        rel="noopener noreferrer"
-                                        style={{
-                                            position: 'absolute',
-                                            bottom: '50px',
-                                            right: '12px',
-                                            padding: '8px 14px',
-                                            background: 'rgba(0,0,0,0.7)',
-                                            color: '#fff',
-                                            border: '1px solid rgba(255,255,255,0.3)',
-                                            borderRadius: '20px',
-                                            fontSize: '0.8rem',
-                                            textDecoration: 'none',
-                                            zIndex: 10,
-                                            display: 'flex',
-                                            alignItems: 'center',
-                                            gap: '4px',
-                                            backdropFilter: 'blur(8px)'
-                                        }}
-                                    >
-                                        <svg viewBox="0 0 24 24" fill="currentColor" width="14" height="14">
-                                            <path d="M19 19H5V5h7V3H5a2 2 0 00-2 2v14a2 2 0 002 2h14c1.1 0 2-.9 2-2v-7h-2v7zM14 3v2h3.59l-9.83 9.83 1.41 1.41L19 6.41V10h2V3h-7z" />
-                                        </svg>
-                                        YouTube
-                                    </a>
                                 </>
                             )}
                         </div>
@@ -636,9 +608,9 @@ function Watch() {
                                     className="control-btn-nav"
                                     title="上一首"
                                     disabled={!playlistId && !playlistItems.length}
-                                    style={{ opacity: (playlistId || playlistItems.length) ? 1 : 0.5 }}
+                                    style={{ opacity: (playlistId || playlistItems.length) ? 1 : 0.5, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px' }}
                                 >
-                                    ⏮ 上一首
+                                    <img src="https://api.iconify.design/famicons/play-skip-back.svg?color=white" alt="Prev" style={{ width: '16px', height: '16px' }} /> 上一首
                                 </button>
                                 <span style={{ color: '#aaa', fontSize: '13px' }}>
                                     {playlistId ? `播放清單: ${playlistItems.length} 首` : '無播放清單'}
@@ -647,8 +619,9 @@ function Watch() {
                                     onClick={goToNextVideo}
                                     className="control-btn-nav"
                                     title="下一首"
+                                    style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px' }}
                                 >
-                                    下一首 ⏭
+                                    下一首 <img src="https://api.iconify.design/ion/play-skip-forward.svg?color=white" alt="Next" style={{ width: '16px', height: '16px' }} />
                                 </button>
                                 <style>{`
                                     .control-btn-nav {
@@ -703,7 +676,7 @@ function Watch() {
                                             gap: '6px'
                                         }}
                                     >
-                                        📺 切換回 YouTube
+                                        <img src="https://api.iconify.design/mdi/youtube-tv.svg?color=white" alt="YouTube" style={{ width: '20px', height: '20px' }} /> 切換回 YouTube
                                     </button>
                                 )}
 
@@ -791,22 +764,24 @@ function Watch() {
                                         onClick={() => setIsShuffle(!isShuffle)}
                                         style={{ background: isShuffle ? '#fff' : 'var(--bg-secondary)', color: isShuffle ? '#000' : 'inherit' }}
                                     >
-                                        🔀 隨機播放
+                                        <img src={`https://api.iconify.design/cuida/shuffle-outline.svg?color=${isShuffle ? 'black' : 'white'}`} alt="Shuffle" style={{ width: '18px', height: '18px' }} /> 隨機播放
                                     </button>
                                 )}
                                 <span className="action-button">
-                                    👁️ {formatViews(videoInfo?.view_count)}
+                                    <img src="https://api.iconify.design/mdi/eye.svg?color=white" alt="Views" style={{ width: '16px', height: '16px', marginRight: '4px', verticalAlign: 'text-bottom' }} />
+                                    {formatViews(videoInfo?.view_count)}
                                 </span>
                                 {videoInfo?.published_at && (
                                     <span className="action-button">
-                                        📅 {formatTimeAgo(videoInfo.published_at)}
+                                        <img src="https://api.iconify.design/hugeicons/date-time.svg?color=white" alt="Date" style={{ width: '16px', height: '16px', marginRight: '4px', verticalAlign: 'text-bottom' }} />
+                                        {formatTimeAgo(videoInfo.published_at)}
                                     </span>
                                 )}
                                 <button className="action-button" onClick={() => {
                                     navigator.clipboard.writeText(window.location.href)
                                     alert('連結已複製!')
                                 }}>
-                                    📋 分享
+                                    <img src="https://api.iconify.design/uil/share.svg?color=white" alt="Share" style={{ width: '18px', height: '18px' }} /> 分享
                                 </button>
                                 <button className="action-button" onClick={() => setShowPlaylistModal(true)}>
                                     ➕ 加入播放清單
@@ -941,7 +916,6 @@ function Watch() {
                 .watch-page {
                     width: 100%;
                     max-width: 100%;
-                    overflow-x: hidden;
                 }
                 
                 @keyframes spin {

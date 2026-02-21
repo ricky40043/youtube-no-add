@@ -1,0 +1,111 @@
+直接動手做 TF-IDF 是一個非常務實且扎實的起點。它不需要依賴外部的 AI 模型 API，運算速度極快，而且對於文字的特徵提取有著很直觀的數學基礎。
+
+為了實作這個策略，我們需要用到 Python 的兩個強大套件：jieba（處理中文斷詞）與 scikit-learn（處理 TF-IDF 與計算餘弦相似度）。
+
+這套流程的核心概念是：將你的「觀看歷史」視為一篇長文章（User Profile），將「候選影片」視為一篇篇短文章（Items）。透過 TF-IDF 找出這些文章中的重要關鍵字，然後在多維向量空間中計算它們的夾角（Cosine Similarity）。夾角越小，相似度越高，就越值得推薦。
+
+以下是為你量身打造的完整實戰程式碼：
+
+準備工作：安裝必備套件
+Bash
+pip install jieba scikit-learn youtubesearchpython
+核心實作：TF-IDF 推薦引擎
+這段程式碼涵蓋了從「歷史紀錄斷詞」、「產生候選名單」到「相似度排序」的完整 Pipeline：
+
+Python
+import jieba
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.metrics.pairwise import cosine_similarity
+from youtubesearchpython import VideosSearch
+import json
+
+# ==========================================
+# 步驟 1：建立你的「興趣畫像」(User Profile)
+# ==========================================
+# 實務上，這會是你透過 yt-dlp 撈回來的近期觀看歷史影片標題或 Tags
+watch_history = [
+    "Go語言實戰：微服務架構設計與 gRPC 效能優化",
+    "Python AI 開發：YOLOv10 影像辨識與自動化系統教學",
+    "後端工程師必學：Nginx 反向代理與伺服器部署",
+    "Synology NAS 網路設定、權限管理與 Docker 容器化應用",
+    "動漫精華回顧：鬼滅之刃與火影忍者熱血片段剪輯"
+]
+
+def tokenize_text(text):
+    """使用 jieba 進行中文斷詞，並過濾掉單一字元（如標點符號或無意義的字）"""
+    words = jieba.cut(text)
+    return " ".join([w for w in words if len(w) > 1])
+
+# 將歷史紀錄合併並斷詞，形成一個代表你興趣的「超級文本」
+user_profile_text = " ".join([tokenize_text(title) for title in watch_history])
+print("✅ 你的興趣畫像特徵詞：\n", user_profile_text, "\n")
+
+
+# ==========================================
+# 步驟 2：獲取「候選影片」(Candidate Generation)
+# ==========================================
+# 從歷史紀錄中提取一些核心關鍵字去 YouTube 搜尋，當作推薦池
+search_keywords = ["Go語言 後端開發", "AI 影像辨識 實戰", "Docker 部署教學"]
+candidates = []
+seen_video_ids = set() # 用來避免重複影片
+
+print("🔍 正在從 YouTube 抓取候選影片...")
+for kw in search_keywords:
+    videosSearch = VideosSearch(kw, limit=4)
+    results = videosSearch.result()
+    
+    for video in results['result']:
+        vid = video['id']
+        if vid not in seen_video_ids:
+            seen_video_ids.add(vid)
+            candidates.append({
+                'id': vid,
+                'title': video['title'],
+                'channel': video['channel']['name'],
+                # 為了計算相似度，我們需要將候選影片的標題也進行斷詞
+                'text_for_tfidf': tokenize_text(video['title']) 
+            })
+
+
+# ==========================================
+# 步驟 3：TF-IDF 向量化與計算相似度 (Ranking)
+# ==========================================
+# 將 User Profile 和所有候選影片放在同一個陣列（Corpus）中進行 TF-IDF 訓練
+corpus = [user_profile_text] + [c['text_for_tfidf'] for c in candidates]
+
+# 初始化 TF-IDF 轉換器
+vectorizer = TfidfVectorizer()
+tfidf_matrix = vectorizer.fit_transform(corpus)
+
+# 矩陣的第 0 筆資料是你的 User Profile，後面都是候選影片
+user_vector = tfidf_matrix[0:1]
+candidate_vectors = tfidf_matrix[1:]
+
+# 計算餘弦相似度 (Cosine Similarity)
+# 數值介於 0~1 之間，越接近 1 代表與你的興趣越吻合
+similarities = cosine_similarity(user_vector, candidate_vectors)[0]
+
+
+# ==========================================
+# 步驟 4：排序並輸出最終推薦首頁 (Post-processing)
+# ==========================================
+for i in range(len(candidates)):
+    candidates[i]['score'] = similarities[i]
+
+# 根據相似度分數，由高到低排序
+ranked_candidates = sorted(candidates, key=lambda x: x['score'], reverse=True)
+
+print("\n🎉 你的專屬 YouTube 推薦首頁：")
+print("-" * 50)
+for rank, video in enumerate(ranked_candidates, 1):
+    print(f"Top {rank} | 關聯度: {video['score']:.4f}")
+    print(f"🎬 {video['title']}")
+    print(f"📺 頻道: {video['channel']}")
+    print(f"🔗 連結: https://www.youtube.com/watch?v={video['id']}")
+    print("-" * 50)
+實作上的優化建議
+加入停用詞 (Stop Words)：目前的斷詞會把「的」、「與」、「教學」等字也算進去。實務上，你會需要建立一個 stopwords.txt，把這些無助於辨識主題的詞彙過濾掉，相似度分數會更精準。
+
+特徵權重分配：如果你透過 yt-dlp 抓取到了影片的 tags (標籤) 和 description (描述)，可以把它們跟標題合併。例如給予標題 2 倍權重：text_for_tfidf = title + " " + title + " " + " ".join(tags)。
+
+防呆機制 (Exploration)：純粹的 TF-IDF 很容易導致「資訊繭房」（推薦的內容越來越窄）。可以在最後的排序中，隨機插入 1-2 部相似度較低但觀看次數極高的熱門影片，增加驚喜感。

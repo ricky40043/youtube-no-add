@@ -32,6 +32,10 @@ async def run_sync_task(user_id: int):
             
             # Refresh profile after sync
             await recommendation_service.refresh_user_profile(db, user_id)
+            
+            # Fetch new recommendations based on refreshed profile
+            await recommendation_service.fetch_recommendations_for_user(db, user_id)
+            
             logger.info(f"Background sync finished for user {user_id}")
             
         except Exception as e:
@@ -39,7 +43,7 @@ async def run_sync_task(user_id: int):
 
 @router.get("/")
 async def get_feed(
-    cursor: Optional[str] = None,
+    cursor: Optional[str] = None, # Used as integer offset now
     limit: int = 20,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
@@ -47,72 +51,47 @@ async def get_feed(
     """
     Get personalized recommendation feed.
     """
-    # 1. Fetch User Profile (optional now if we sort by date, but keeping it)
-    # ... (omitted, standard part)
+    # 1. Fetch User Profile Text for TF-IDF
+    user_profile_text = await recommendation_service.get_user_profile_text(db, current_user.id)
     
-    # 2. Parse Cursor
-    last_pub_ts = None
-    last_vid_id = None
+    # 2. Fetch Subscriptions
+    stmt_subs = select(Subscription.channel_id).where(Subscription.user_id == current_user.id)
+    result_subs = await db.execute(stmt_subs)
+    sub_channel_ids = set(result_subs.scalars().all())
     
+    # 3. Fetch candidate videos (e.g. recent 60 days)
+    from sqlalchemy import desc
+    one_month_ago = datetime.utcnow() - timedelta(days=60)
+    
+    # Fetch top 800 overall recent videos
+    stmt_videos = select(Video).where(Video.published_at >= one_month_ago).order_by(Video.published_at.desc()).limit(800)
+    result_videos = await db.execute(stmt_videos)
+    videos = result_videos.scalars().all()
+    
+    # 4. Batch Score them using TF-IDF
+    scored_results = await recommendation_service.calculate_scores_batch(user_profile_text, videos, sub_channel_ids)
+    
+    valid_scored = []
+    for score, v in scored_results:
+        # Check affinity to include ALL subscribed items, or high score items
+        if v.channel_id in sub_channel_ids or score > 0.001:
+            valid_scored.append((score, v))
+            
+    # Sort by score desc, then by date desc
+    valid_scored.sort(key=lambda x: (x[0], x[1].published_at.timestamp() if x[1].published_at else 0), reverse=True)
+    
+    # 5. Paginate
+    offset = 0
     if cursor:
         try:
-            decoded = base64.b64decode(cursor).decode()
-            parts = decoded.split('|')
-            last_ts_str = parts[0]
-            last_vid_id = parts[1] if len(parts) > 1 else ""
-            last_pub_ts = float(last_ts_str)
-        except Exception as e:
-            logger.warning(f"Invalid cursor: {e}")
+            offset = int(cursor)
+        except ValueError:
+            pass
 
-    # 3. Build Query
-    # Filter: Within last 180 days (global window)
-    one_month_ago = datetime.utcnow() - timedelta(days=180)
+    paged_items = [x[1] for x in valid_scored[offset : offset + limit]]
     
-    from sqlalchemy import and_, or_
-    
-    # Base conditions
-    conditions = [
-        Subscription.user_id == current_user.id,
-        Video.published_at >= one_month_ago
-    ]
-    
-    # Cursor conditions (Keyset Pagination)
-    if last_pub_ts is not None:
-        last_pub_dt = datetime.utcfromtimestamp(last_pub_ts)
-        # (published_at < dt) OR (published_at == dt AND id < last_id)
-        # Note: published_at is DESC. So we want smaller dates.
-        # But wait, published_at in DB might be different precision?
-        # Safe comparison: 
-        conditions.append(
-            or_(
-                Video.published_at < last_pub_dt,
-                and_(Video.published_at == last_pub_dt, Video.id < last_vid_id)
-            )
-        )
-
-    stmt = select(Video).join(Subscription, Subscription.channel_id == Video.channel_id)\
-        .where(and_(*conditions))\
-        .order_by(Video.published_at.desc(), Video.id.desc())\
-        .limit(limit) # Efficient fetch matching request size
-        
-    result = await db.execute(stmt)
-    # We fetch 'limit' items. If we get 'limit' items, there *might* be more.
-    # To know if hasNext, usually fetch limit+1.
-    
-    # Let's re-execute with limit+1
-    stmt = stmt.limit(limit + 1)
-    result = await db.execute(stmt)
-    videos = result.scalars().all()
-    
-    has_next = len(videos) > limit
-    paged_items = videos[:limit]
-    
-    # 4. Next Cursor construction
-    next_cursor = None
-    if has_next and paged_items:
-        last_item = paged_items[-1]
-        cursor_str = f"{last_item.published_at.timestamp()}|{last_item.id}"
-        next_cursor = base64.b64encode(cursor_str.encode()).decode()
+    has_next = (offset + limit) < len(valid_scored)
+    next_cursor = str(offset + limit) if has_next else None
 
     return {
         "items": paged_items,
