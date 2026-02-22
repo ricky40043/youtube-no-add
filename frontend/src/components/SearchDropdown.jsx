@@ -1,12 +1,25 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { getSearchHistory, removeSearchHistory } from '../utils/searchHistory'
-import { searchApi } from '../services/api'
+import { getSearchHistory, removeSearchHistory, clearSearchHistory } from '../utils/searchHistory'
+import { searchApi, authApi, searchHistoryApi } from '../services/api'
 
 function SearchDropdown({ query, isVisible, onSelect, onFillQuery, onClose }) {
     const [history, setHistory] = useState([])
     const [suggestions, setSuggestions] = useState([])
+    const [isLoggedIn, setIsLoggedIn] = useState(false)
     const dropdownRef = useRef(null)
     const debounceRef = useRef(null)
+
+    // Check login status on mount and when auth changes
+    useEffect(() => {
+        const checkAuth = () => {
+            const user = authApi.getCurrentUser()
+            setIsLoggedIn(!!user)
+        }
+        
+        checkAuth()
+        window.addEventListener('auth-change', checkAuth)
+        return () => window.removeEventListener('auth-change', checkAuth)
+    }, [])
 
     // Swipe state per item
     const [swipingIndex, setSwipingIndex] = useState(null)
@@ -15,12 +28,27 @@ function SearchDropdown({ query, isVisible, onSelect, onFillQuery, onClose }) {
     const touchStartY = useRef(0)
     const isSwiping = useRef(false)
 
-    // Load history
+    // Load history from backend if logged in
     useEffect(() => {
-        if (isVisible) {
-            setHistory(getSearchHistory())
+        console.log('[SearchDropdown] isVisible:', isVisible, 'isLoggedIn:', isLoggedIn)
+        if (isVisible && isLoggedIn) {
+            console.log('[SearchDropdown] Fetching search history...')
+            searchHistoryApi.get(10)
+                .then(data => {
+                    const historyList = data.map(item => ({
+                        query: item.query,
+                        timestamp: new Date(item.searched_at).getTime()
+                    }))
+                    setHistory(historyList)
+                })
+                .catch(err => {
+                    console.error('Failed to fetch search history:', err)
+                    setHistory([])
+                })
+        } else {
+            setHistory([])
         }
-    }, [isVisible, query])
+    }, [isVisible, isLoggedIn])
 
     // Fetch suggestions with debounce
     useEffect(() => {
@@ -134,12 +162,28 @@ function SearchDropdown({ query, isVisible, onSelect, onFillQuery, onClose }) {
 
     if (!isVisible) return null
 
+    // Show dropdown if:
+    // 1. Has query (showing suggestions)
+    // 2. Has history (showing search history)
     const hasContent = filteredHistory.length > 0 || filteredSuggestions.length > 0
-
+    
+    // Always show dropdown when focused if there's history or query
     if (!hasContent && !query.trim()) return null
 
     return (
         <div className="search-dropdown" ref={dropdownRef}>
+            {/* History Header */}
+            {filteredHistory.length > 0 && !query.trim() && (
+                <div className="dropdown-header">
+                    <span className="dropdown-header-title">最近的搜尋</span>
+                    <button className="dropdown-clear-btn" onClick={(e) => {
+                        e.stopPropagation();
+                        clearSearchHistory();
+                        setHistory([]);
+                    }}>清除全部</button>
+                </div>
+            )}
+
             {/* History Items */}
             {filteredHistory.map((item, index) => (
                 <div
@@ -171,6 +215,16 @@ function SearchDropdown({ query, isVisible, onSelect, onFillQuery, onClose }) {
                                 loading="lazy"
                             />
                         )}
+                        <button
+                            className="dropdown-item-remove"
+                            onClick={(e) => handleDelete(item.query, e)}
+                            title="刪除紀錄"
+                            style={{ opacity: 1, pointerEvents: 'auto' }}
+                        >
+                            <svg viewBox="0 0 24 24" fill="currentColor" width="20" height="20">
+                                <path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12 19 6.41z" />
+                            </svg>
+                        </button>
                         <button
                             className="dropdown-item-fill"
                             onClick={(e) => {
@@ -318,10 +372,58 @@ function SearchDropdown({ query, isVisible, onSelect, onFillQuery, onClose }) {
                     justify-content: center;
                     flex-shrink: 0;
                     transition: background 0.15s;
+                    background: none;
+                    border: none;
+                    cursor: pointer;
                 }
 
                 .dropdown-item-fill:hover {
                     background: rgba(255,255,255,0.1);
+                }
+
+                .dropdown-item-remove {
+                    color: var(--text-secondary, #aaa);
+                    padding: 8px;
+                    border-radius: 50%;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    flex-shrink: 0;
+                    transition: all 0.15s;
+                    background: none;
+                    border: none;
+                    cursor: pointer;
+                }
+
+                .dropdown-item-remove:hover {
+                    background: rgba(255,255,255,0.1);
+                    color: #e53935;
+                }
+
+                .dropdown-header {
+                    display: flex;
+                    justify-content: space-between;
+                    align-items: center;
+                    padding: 12px 16px 8px;
+                }
+
+                .dropdown-header-title {
+                    font-size: 0.85rem;
+                    color: var(--text-secondary, #aaa);
+                    font-weight: 600;
+                }
+
+                .dropdown-clear-btn {
+                    font-size: 0.85rem;
+                    color: var(--primary, #3ea6ff);
+                    background: none;
+                    border: none;
+                    cursor: pointer;
+                    padding: 0;
+                }
+
+                .dropdown-clear-btn:hover {
+                    text-decoration: underline;
                 }
 
                 .dropdown-item-delete {

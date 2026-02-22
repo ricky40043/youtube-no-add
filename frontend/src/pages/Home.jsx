@@ -12,19 +12,34 @@ function Home() {
     // 'recommended' | 'trending' | 'notifications'
     const [activeTab, setActiveTab] = useState(user ? 'recommended' : 'trending')
     const [syncing, setSyncing] = useState(false)
-    const [notifications, setNotifications] = useState([])
-
-    // Pagination state
-    const [cursor, setCursor] = useState(null)
     const [hasMore, setHasMore] = useState(true)
 
-    // Fetch Feed (Recommended)
-    const fetchFeed = async (init = false) => {
+    // Refs for stable infinite scroll (avoid stale closure)
+    const cursorRef = useRef(null)
+    const hasMoreRef = useRef(true)
+    const isLoadingRef = useRef(false)
+    const observerRef = useRef(null)
+    const sentinelRef = useRef(null)
+    const fetchFeedRef = useRef(null)
+
+    // Stable fetchFeed with useCallback
+    const fetchFeed = useCallback(async (init = false) => {
+        console.log('[Home] fetchFeed CLICKED, init:', init, 'cursor:', cursorRef.current)
+        if (isLoadingRef.current) {
+            console.log('[Home] Already loading, skip')
+            return
+        }
+        
+        isLoadingRef.current = true
         setLoading(true)
         setError(null)
+
         try {
-            const currentCursor = init ? null : cursor
+            const currentCursor = init ? null : cursorRef.current
+            console.log('[Home] Calling API with cursor:', currentCursor)
+            
             const data = await feedApi.getFeed(currentCursor)
+            console.log('[Home] API returned:', data.items?.length, 'items, cursor:', data.next_cursor)
 
             if (init) {
                 setVideos(data.items || [])
@@ -32,52 +47,66 @@ function Home() {
                 setVideos(prev => [...prev, ...(data.items || [])])
             }
 
-            setCursor(data.next_cursor)
-            setHasMore(!!data.next_cursor)
+            // Check if there are more items to load
+            const hasItems = data.items && data.items.length > 0
+            const nextPage = data.next_cursor || (hasItems ? String((parseInt(cursorRef.current) || 0) + 1) : null)
+            cursorRef.current = nextPage
+            hasMoreRef.current = hasItems && !!data.next_cursor
+            setHasMore(hasItems && !!data.next_cursor)
+            console.log('[Home] Set next cursor to:', nextPage)
         } catch (err) {
-            console.error('Failed to fetch feed:', err)
+            console.error('[Home] Error:', err)
             setError('無法載入更多推薦，請稍後再試')
         } finally {
+            isLoadingRef.current = false
             setLoading(false)
         }
-    }
+    }, [])
 
     // Fetch Trending
-    const fetchTrending = async () => {
+    const fetchTrending = useCallback(async () => {
+        isLoadingRef.current = true
         setLoading(true)
         setError(null)
         try {
             const results = await searchApi.getTrending('TW')
             setVideos(results)
+            hasMoreRef.current = false
             setHasMore(false)
         } catch (err) {
             console.error('Failed to fetch trending:', err)
             setError('無法載入熱門影片')
         } finally {
+            isLoadingRef.current = false
             setLoading(false)
         }
-    }
+    }, [])
 
     // Fetch Notifications
-    const fetchNotifications = async () => {
+    const fetchNotifications = useCallback(async () => {
+        isLoadingRef.current = true
         setLoading(true)
         setError(null)
         try {
             const data = await subscriptionApi.getNotifications()
-            setVideos(data) // Reuse setVideos to render VideoCards
+            setVideos(data)
+            hasMoreRef.current = false
             setHasMore(false)
         } catch (err) {
             console.error("Failed to fetch notifications:", err)
             setError("無法載入通知")
         } finally {
+            isLoadingRef.current = false
             setLoading(false)
         }
-    }
+    }, [])
 
     // Initial load when tab changes
     useEffect(() => {
+        window.scrollTo(0, 0)
         setVideos([])
-        setCursor(null)
+        cursorRef.current = null
+        hasMoreRef.current = true
         setHasMore(true)
 
         if (activeTab === 'recommended' && user) {
@@ -87,7 +116,7 @@ function Home() {
         } else {
             fetchTrending()
         }
-    }, [activeTab, user])
+    }, [activeTab, user, fetchFeed, fetchNotifications, fetchTrending])
 
     // Listen for notification changes globally
     useEffect(() => {
@@ -98,7 +127,7 @@ function Home() {
         }
         window.addEventListener('notification-change', handleNotifyChange)
         return () => window.removeEventListener('notification-change', handleNotifyChange)
-    }, [activeTab, user])
+    }, [activeTab, user, fetchNotifications])
 
     // Auto-sync on mount
     useEffect(() => {
@@ -118,30 +147,40 @@ function Home() {
             }
             autoSync()
         }
-    }, [])
+    }, [user, activeTab, fetchFeed])
 
-    // Observer for infinite scroll
-    const observer = useRef()
-    const lastVideoElementRef = useCallback(node => {
-        if (loading) return
-        if (observer.current) observer.current.disconnect()
-        observer.current = new IntersectionObserver(entries => {
-            if (entries[0].isIntersecting && hasMore) {
+    // Stable Observer for infinite scroll (sentinel-based)
+    useEffect(() => {
+        observerRef.current = new IntersectionObserver(entries => {
+            if (entries[0].isIntersecting && !isLoadingRef.current && hasMoreRef.current) {
                 if (activeTab === 'recommended') {
                     fetchFeed(false)
                 }
             }
-        }, {
-            rootMargin: '200px',
-            threshold: 0
-        })
-        if (node) observer.current.observe(node)
-    }, [loading, hasMore, activeTab, fetchFeed])
+        }, { rootMargin: '400px', threshold: 0 })
+
+        return () => observerRef.current?.disconnect()
+    }, [activeTab, fetchFeed])
+
+    // Observe sentinel when videos change
+    useEffect(() => {
+        const sentinel = sentinelRef.current
+        if (sentinel && observerRef.current) {
+            observerRef.current.observe(sentinel)
+            return () => observerRef.current?.unobserve(sentinel)
+        }
+    }, [videos.length])
 
     // ... (rest is same until render)
 
     const handleSync = async () => {
         // ... (can keep function or remove if unused, but removing button is key)
+    }
+
+    const handleRetry = () => {
+        if (activeTab === 'recommended') fetchFeed(true)
+        else if (activeTab === 'trending') fetchTrending()
+        else fetchNotifications()
     }
 
     return (
@@ -171,7 +210,7 @@ function Home() {
                             paddingBottom: '4px'
                         }}
                     >
-                        ✨ 為您推薦
+                        {user ? '✨ 為您推薦' : '✨ 登入以獲推薦'}
                     </button>
                 )}
 
@@ -212,12 +251,7 @@ function Home() {
                 <div className="error-message">
                     <h2>😕 載入失敗</h2>
                     <p>{error}</p>
-                    <p>{error}</p>
-                    <button onClick={() => {
-                        if (activeTab === 'recommended') fetchFeed(true)
-                        else if (activeTab === 'trending') fetchTrending()
-                        else fetchNotifications()
-                    }} style={{ marginTop: '16px', textDecoration: 'underline' }}>重試</button>
+                    <button onClick={handleRetry} style={{ marginTop: '16px', textDecoration: 'underline' }}>重試</button>
                 </div>
             ) : (
                 <>
@@ -231,18 +265,33 @@ function Home() {
                         </div>
                     ) : (
                         <div className="video-grid">
-                            {videos.map((video, index) => {
-                                if (videos.length === index + 1) {
-                                    return (
-                                        <div ref={lastVideoElementRef} key={video.id || index}>
-                                            <VideoCard video={video} />
-                                        </div>
-                                    )
-                                } else {
-                                    return <VideoCard key={video.id || index} video={video} />
-                                }
-                            })}
+                            {videos.map((video) => (
+                                <VideoCard key={video.id} video={video} />
+                            ))}
                         </div>
+                    )}
+
+                    {/* Sentinel for infinite scroll */}
+                    <div ref={sentinelRef} style={{ height: '20px' }} />
+
+                    {/* Manual Load More Button - only show when has videos AND has more */}
+                    {videos.length > 0 && hasMore && !loading && (
+                        <button 
+                            onClick={() => fetchFeed(false)}
+                            style={{ 
+                                display: 'block', 
+                                margin: '20px auto', 
+                                padding: '12px 24px',
+                                background: 'var(--accent)',
+                                color: 'white',
+                                border: 'none',
+                                borderRadius: '24px',
+                                cursor: 'pointer',
+                                fontSize: '14px'
+                            }}
+                        >
+                            載入更多
+                        </button>
                     )}
 
                     {loading && (
@@ -255,6 +304,12 @@ function Home() {
                     {!hasMore && videos.length > 0 && activeTab === 'recommended' && (
                         <div style={{ textAlign: 'center', padding: '20px', color: '#666' }}>
                             沒有更多推薦了
+                        </div>
+                    )}
+
+                    {!hasMore && videos.length === 0 && activeTab === 'recommended' && !loading && (
+                        <div style={{ textAlign: 'center', padding: '20px', color: '#666' }}>
+                            無法載入更多
                         </div>
                     )}
                 </>

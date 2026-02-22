@@ -32,8 +32,11 @@ class RecommendationScorer:
         words = jieba.cut(text)
         return " ".join([w for w in words if len(w) > 1])
 
-    async def get_user_profile_text(self, db: AsyncSession, user_id: int) -> str:
+    async def get_user_profile_text(self, db: AsyncSession, user_id: int, recent_searches: Optional[str] = None) -> str:
         """將使用者最近的觀看紀錄組成一篇超級文本 (User Profile Text)"""
+        if not user_id:
+            return ""
+            
         stmt = select(WatchHistory)\
             .where(WatchHistory.user_id == user_id)\
             .order_by(WatchHistory.watched_at.desc())\
@@ -43,6 +46,15 @@ class RecommendationScorer:
         history_items = result.scalars().all()
         
         texts = []
+        
+        # 1. 優先塞入近期的主動搜尋字串（代表最強的當下意圖），賦予高權重
+        if recent_searches:
+            search_terms = recent_searches.split(',')
+            for term in search_terms:
+                if term.strip():
+                    texts.extend([term.strip()] * 5) # 最高權重 x5
+                    
+        # 2. 歷史紀錄
         for wh in history_items:
             t = wh.video_title or ""
             # 跟據觀看完成度決定權重 (字串重複次數)
@@ -87,6 +99,8 @@ class RecommendationScorer:
         # 3. 綜合評分
         scored_videos = []
         now = datetime.utcnow()
+        import random
+        
         for i, video in enumerate(videos):
             sim = similarities[i]
             
@@ -103,7 +117,14 @@ class RecommendationScorer:
             # Affinity (訂閱頻道加分)
             affinity_score = 1.0 if video.channel_id in sub_channel_ids else 0.0
             
-            final_score = (self.ALPHA * sim) + (self.BETA * freshness_score) + (self.GAMMA * affinity_score)
+            # Serendipity Jitter (打破 Filter Bubble，讓探索影片浮出)
+            # 基本隨機抖動 0.0 ~ 0.05
+            serendipity_score = random.uniform(0.0, 0.05)
+            # 有 15% 機率賦予巨大加分，讓冷門影片強制曝光
+            if random.random() < 0.15:
+                serendipity_score += random.uniform(0.1, 0.25)
+            
+            final_score = (self.ALPHA * sim) + (self.BETA * freshness_score) + (self.GAMMA * affinity_score) + serendipity_score
             scored_videos.append((final_score, video))
             
         return scored_videos
@@ -138,8 +159,8 @@ class RecommendationScorer:
         and store them in the Video table so they can be surfaced in the feed.
         """
         try:
-            # 1. Get Top 2-3 tags
-            stmt = select(UserTagAffinity).where(UserTagAffinity.user_id == user_id).order_by(UserTagAffinity.score.desc()).limit(3)
+            # 1. Get Top 10 tags (取得更多標籤供隨機挑選，避免卡死在某個主題)
+            stmt = select(UserTagAffinity).where(UserTagAffinity.user_id == user_id).order_by(UserTagAffinity.score.desc()).limit(10)
             result = await db.execute(stmt)
             top_tags = result.scalars().all()
             
@@ -147,11 +168,19 @@ class RecommendationScorer:
                 return
 
             from services.ytdlp_service import ytdlp_service
+            import random
             
-            # 2. Search YouTube for each tag
-            for uta in top_tags:
+            # 隨機挑選 3 個標籤以保持背景探索的多樣性
+            selected_tags = random.sample(top_tags, min(3, len(top_tags)))
+            
+            # 使用探索字尾
+            explore_suffixes = ["", " 最新", " 推薦", " 解說", " 相關"]
+            
+            # 2. Search YouTube for each random tag
+            for uta in selected_tags:
                 tag = uta.tag
-                logger.info(f"Fetching recommendations for tag: {tag}")
+                search_query = f"{tag}{random.choice(explore_suffixes)}"
+                logger.info(f"Fetching recommendations for broader query: {search_query}")
                 try:
                     # search using yt-dlp
                     results = await ytdlp_service.search(tag, max_results=5)
@@ -168,12 +197,20 @@ class RecommendationScorer:
                             
                         # Parse date carefully
                         pub_at = r.get("published_at")
-                        dt = datetime.utcnow()
-                        if pub_at and isinstance(pub_at, str) and len(pub_at) == 8:
+                        dt = None # Default to None if failed
+                        if pub_at and isinstance(pub_at, str):
+                            # Try YYYY-MM-DD or YYYYMMDD
                             try:
-                                dt = datetime.strptime(pub_at, "%Y%m%d")
+                                if '-' in pub_at:
+                                    dt = datetime.strptime(pub_at[:10], "%Y-%m-%d")
+                                elif len(pub_at) == 8:
+                                    dt = datetime.strptime(pub_at, "%Y%m%d")
                             except:
                                 pass
+                        
+                        # Fallback: Don't use utcnow() if we want accurate "Time Ago"
+                        # If dt is None, the DB and Frontend will handle it (showing nothing or placeholder)
+                        # Instead of "8 hours ago" for a 7 year old video.
 
                         v = Video(
                             id=vid_id,

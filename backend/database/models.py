@@ -14,6 +14,7 @@ class User(Base):
     playlists = relationship("Playlist", back_populates="owner")
     history = relationship("WatchHistory", back_populates="user")
     subscriptions = relationship("Subscription", back_populates="user")
+    search_history = relationship("SearchHistory", back_populates="user")
 
 class Playlist(Base):
     __tablename__ = "playlists"
@@ -61,6 +62,16 @@ class WatchHistory(Base):
     interaction_type = Column(String, default='view')
     
     user = relationship("User", back_populates="history")
+
+class SearchHistory(Base):
+    __tablename__ = "search_history"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"))
+    query = Column(String)
+    searched_at = Column(DateTime, default=datetime.utcnow)
+    
+    user = relationship("User", back_populates="search_history")
 
 class Subscription(Base):
     __tablename__ = "subscriptions"

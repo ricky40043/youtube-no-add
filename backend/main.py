@@ -31,6 +31,9 @@ app.include_router(history.router, prefix="/api/history", tags=["History"])
 app.include_router(subscription.router, prefix="/api/subscriptions", tags=["Subscriptions"])
 app.include_router(feed.router, prefix="/api/feed", tags=["Feed"])
 
+from routers.search_history import router as search_history_router
+app.include_router(search_history_router, prefix="/api/search-history", tags=["SearchHistory"])
+
 
 @app.get("/")
 async def root():

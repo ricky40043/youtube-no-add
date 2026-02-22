@@ -56,7 +56,7 @@ function BottomNav() {
                         </svg>
                     </div>
                 )}
-                <span>你</span>
+                <span>{user ? user.username : '登入'}</span>
             </button>
 
             <style>{`

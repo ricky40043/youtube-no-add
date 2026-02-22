@@ -43,56 +43,123 @@ async def run_sync_task(user_id: int):
 
 @router.get("/")
 async def get_feed(
-    cursor: Optional[str] = None, # Used as integer offset now
-    limit: int = 20,
+    cursor: Optional[str] = None,
+    limit: int = 20,  # Reduced default
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: Optional[User] = Depends(get_current_user)
 ):
     """
     Get personalized recommendation feed.
+    Uses watch history from database to find relevant videos via yt-dlp search.
     """
-    # 1. Fetch User Profile Text for TF-IDF
-    user_profile_text = await recommendation_service.get_user_profile_text(db, current_user.id)
+    import time
+    start_time = time.time()
+    print(f"[FEED] Request started, cursor={cursor}, limit={limit}, user={current_user.id if current_user else 'anonymous'}")
     
-    # 2. Fetch Subscriptions
-    stmt_subs = select(Subscription.channel_id).where(Subscription.user_id == current_user.id)
-    result_subs = await db.execute(stmt_subs)
-    sub_channel_ids = set(result_subs.scalars().all())
+    from services.ytdlp_service import ytdlp_service
     
-    # 3. Fetch candidate videos (e.g. recent 60 days)
-    from sqlalchemy import desc
-    one_month_ago = datetime.utcnow() - timedelta(days=60)
-    
-    # Fetch top 800 overall recent videos
-    stmt_videos = select(Video).where(Video.published_at >= one_month_ago).order_by(Video.published_at.desc()).limit(800)
-    result_videos = await db.execute(stmt_videos)
-    videos = result_videos.scalars().all()
-    
-    # 4. Batch Score them using TF-IDF
-    scored_results = await recommendation_service.calculate_scores_batch(user_profile_text, videos, sub_channel_ids)
-    
-    valid_scored = []
-    for score, v in scored_results:
-        # Check affinity to include ALL subscribed items, or high score items
-        if v.channel_id in sub_channel_ids or score > 0.001:
-            valid_scored.append((score, v))
-            
-    # Sort by score desc, then by date desc
-    valid_scored.sort(key=lambda x: (x[0], x[1].published_at.timestamp() if x[1].published_at else 0), reverse=True)
-    
-    # 5. Paginate
-    offset = 0
+    # Parse cursor
+    page = 0
     if cursor:
         try:
-            offset = int(cursor)
+            page = int(cursor)
         except ValueError:
-            pass
-
-    paged_items = [x[1] for x in valid_scored[offset : offset + limit]]
+            page = 0
     
-    has_next = (offset + limit) < len(valid_scored)
-    next_cursor = str(offset + limit) if has_next else None
-
+    all_videos = []
+    seen_ids = set()
+    
+    # Build search queries from user's interests
+    search_queries = []
+    watch_history_titles = []
+    
+    # 1. Get watch history from DATABASE (only if logged in)
+    # Use top 10 for initial, more for pagination
+    history_limit = 10 + page * 5  # page 0: 10, page 1: 15, page 2: 20...
+    if current_user:
+        try:
+            from database.models import WatchHistory
+            stmt = select(WatchHistory).where(
+                WatchHistory.user_id == current_user.id
+            ).order_by(WatchHistory.watched_at.desc()).limit(history_limit)
+            result = await db.execute(stmt)
+            history_items = result.scalars().all()
+            
+            for wh in history_items:
+                if wh.video_title:
+                    watch_history_titles.append(wh.video_title)
+            print(f"[FEED] Got {len(watch_history_titles)} watch history from DB (limit: {history_limit})")
+        except Exception as e:
+            print(f"[FEED] Failed to get watch history from DB: {e}")
+    
+    # 2. Extract keywords from watch history titles
+    for title in watch_history_titles[:10]:  # Increased from 5 to 10
+        title = title.strip()
+        if title:
+            words = title.split()[:3]
+            if words:
+                search_queries.append(' '.join(words))
+    
+    # 3. For logged in users, add their interest tags
+    if current_user:
+        try:
+            user_profile_text = await recommendation_service.get_user_profile_text(db, current_user.id, None)
+            if user_profile_text:
+                for part in user_profile_text.split(',')[:3]:
+                    if ':' in part:
+                        tag = part.split(':')[0].strip()
+                        if tag:
+                            search_queries.append(tag)
+        except Exception as e:
+            print(f"[FEED] Failed to get user profile: {e}")
+    
+    # Remove duplicates while preserving order
+    seen_queries = set()
+    unique_queries = []
+    for q in search_queries:
+        q_lower = q.lower()
+        if q_lower not in seen_queries and len(q) > 2:
+            seen_queries.add(q_lower)
+            unique_queries.append(q)
+    
+    search_queries = unique_queries[:6 + page * 2]  # page 0: 6, page 1: 8, page 2: 10...
+    print(f"[FEED] Using search queries: {search_queries}")
+    
+    # Search for videos based on interests
+    for query in search_queries:
+        try:
+            print(f"[FEED] Searching yt-dlp for: {query}")
+            results = await ytdlp_service.search(query, max_results=15)
+            print(f"[FEED] yt-dlp returned {len(results)} results for '{query}'")
+            
+            for r in results:
+                vid = r.get('id') or r.get('video_id')
+                if vid and vid not in seen_ids:
+                    seen_ids.add(vid)
+                    all_videos.append(r)
+                    if len(all_videos) >= limit * 10:  # Collect more for pagination
+                        break
+        except Exception as se:
+            print(f"[FEED] yt-dlp search failed for '{query}': {se}")
+        
+        if len(all_videos) >= limit * 10:
+            break
+    
+    # Shuffle for variety and apply pagination
+    random.seed(page * 12345)
+    random.shuffle(all_videos)
+    
+    start_idx = page * limit
+    end_idx = start_idx + limit
+    paged_items = all_videos[start_idx:end_idx]
+    
+    # Pagination
+    has_next = len(all_videos) > end_idx
+    next_cursor = str(page + 1) if has_next else None
+    
+    total_time = time.time() - start_time
+    print(f"[FEED] Returning {len(paged_items)} items, page={page}, has_next={has_next}, time={total_time:.2f}s")
+    
     return {
         "items": paged_items,
         "next_cursor": next_cursor

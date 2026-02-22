@@ -288,29 +288,48 @@ async def proxy_remote_content(url: str):
 
 
 @router.get("/related/{video_id}")
-async def get_related_videos(video_id: str):
+async def get_related_videos(video_id: str, offset: int = 0, limit: int = 20):
     """
     獲取相關影片（多策略並行推薦）
     
-    策略：同頻道、Tags、分類+關鍵字、作者名、清洗標題
-    並行搜尋後去重合併，回傳最多 20 部
+    策略：Tags、作者名、清洗標題（簡化版）
+    並行搜尋後去重合併，回傳最多 30 部
     
     - **video_id**: YouTube 影片 ID
+    - **offset**: 分頁偏移量
+    - **limit**: 每次回傳數量
     """
     import re
+    import time
+    start_time = time.time()
+    print(f"[Related] Request started for {video_id}, offset={offset}, limit={limit}")
     
-    # Check cache first
-    cache_key = f"related:{video_id}"
+    # Check cache first (cache key includes offset)
+    cache_key = f"related:{video_id}:{offset}:{limit}"
     cached = await cache_service.get(cache_key)
     if cached:
         print(f"[Related] Cache hit for {video_id}")
         return cached
     
+    # Check if we have full results cached (for pagination)
+    full_cache_key = f"related:{video_id}:full"
+    full_cached = await cache_service.get(full_cache_key)
+    if full_cached and isinstance(full_cached, list):
+        full_results = full_cached
+        final = full_results[offset:offset + limit]
+        return {
+            "items": final,
+            "total": len(full_results),
+            "next_offset": offset + limit if offset + limit < len(full_results) else None
+        }
+    
     # 1. Get video info
+    t1 = time.time()
     try:
         info = await get_video_info(video_id)
     except Exception:
         raise HTTPException(status_code=404, detail="Original video not found")
+    print(f"[Related] Got video info in {time.time()-t1:.2f}s")
         
     title = info.get("title", "")
     author = info.get("author", "")
@@ -328,7 +347,7 @@ async def get_related_videos(video_id: str):
         if not channel_id:
             return []
         try:
-            results = await ytdlp_service.get_channel_latest_videos(channel_id, limit=8)
+            results = await ytdlp_service.get_channel_latest_videos(channel_id, limit=15)
             print(f"[Related] Channel strategy: {len(results)} results")
             return results
         except Exception as e:
@@ -341,7 +360,7 @@ async def get_related_videos(video_id: str):
             return []
         try:
             tag_query = " ".join(tags[:5])
-            results = await ytdlp_service.search(tag_query, max_results=8)
+            results = await ytdlp_service.search(tag_query, max_results=15)
             print(f"[Related] Tags strategy: {len(results)} results (query: {tag_query[:50]})")
             return results
         except Exception as e:
@@ -363,7 +382,7 @@ async def get_related_videos(video_id: str):
         if not query.strip():
             return []
         try:
-            results = await ytdlp_service.search(query, max_results=8)
+            results = await ytdlp_service.search(query, max_results=15)
             print(f"[Related] Category strategy: {len(results)} results (query: {query[:50]})")
             return results
         except Exception as e:
@@ -373,6 +392,28 @@ async def get_related_videos(video_id: str):
     async def strategy_author():
         """策略4: 搜尋同作者/YouTuber"""
         if not author:
+            return []
+        try:
+            results = await ytdlp_service.search(author, max_results=15)
+            print(f"[Related] Author strategy: {len(results)} results (author: {author})")
+            return results
+        except Exception as e:
+            print(f"[Related] Author strategy failed: {e}")
+            return []
+    
+    async def strategy_clean_title():
+        """策略5: 清洗標題後搜尋"""
+        clean = re.sub(r'[\[\]【】\(\)『』～~「」《》#|\-_]', ' ', title)
+        words = [w for w in clean.split() if len(w) > 1]
+        if len(words) <= 1:
+            return []
+        query = " ".join(words[:5])
+        try:
+            results = await ytdlp_service.search(query, max_results=15)
+            print(f"[Related] Clean title strategy: {len(results)} results (query: {query[:50]})")
+            return results
+        except Exception as e:
+            print(f"[Related] Clean title strategy failed: {e}")
             return []
         try:
             results = await ytdlp_service.search(author, max_results=6)
@@ -397,18 +438,35 @@ async def get_related_videos(video_id: str):
             print(f"[Related] Clean title strategy failed: {e}")
             return []
     
-    # 2. Run selected strategies in parallel (Reduced to avoid rate limiting)
+    # 2. Run fewer strategies for performance (only 3 instead of 5)
+    # Use tags + clean_title + author (skip channel to avoid duplicates)
     results = await asyncio.gather(
-        strategy_channel(),
+        strategy_tags(),
         strategy_clean_title(),
+        strategy_author(),
         return_exceptions=True
     )
     
-    # 3. Merge results with priority
+    # 3. Merge results with weighted mixing (simplified)
     seen_ids = {video_id}  # exclude current video
     merged = []
     
-    strategy_names = ["channel", "clean_title"]
+    # Simpler weights: tags 50%, clean_title 30%, author 20%
+    strategy_weights = {
+        "tags": 0.50,
+        "clean_title": 0.30,
+        "author": 0.20
+    }
+    strategy_names = ["tags", "clean_title", "author"]
+    # Higher limits since we're running fewer queries
+    strategy_limits = {
+        "tags": 15,
+        "clean_title": 10,
+        "author": 10
+    }
+    
+    # Count per strategy for limiting
+    strategy_counts = {name: 0 for name in strategy_names}
     
     for idx, batch in enumerate(results):
         if isinstance(batch, Exception):
@@ -416,28 +474,55 @@ async def get_related_videos(video_id: str):
             continue
         if not isinstance(batch, list):
             continue
+        
+        strategy_name = strategy_names[idx]
+        weight = strategy_weights.get(strategy_name, 0)
+        limit = strategy_limits.get(strategy_name, 10)
+        
         for video in batch:
             vid = video.get('id')
-            if vid and vid not in seen_ids:
+            if vid and vid not in seen_ids and strategy_counts[strategy_name] < limit:
                 seen_ids.add(vid)
-                video['_source'] = strategy_names[idx]
+                strategy_counts[strategy_name] += 1
+                
+                # Calculate score based on weight and view_count
+                view_count = video.get('view_count') or 0
+                view_score = min(view_count / 1000000, 10)  # Normalize to 0-10
+                score = weight * (view_score + 1)  # +1 to ensure non-zero
+                
+                video['_source'] = strategy_name
+                video['_score'] = score
                 merged.append(video)
     
-    # 4. Sort: prioritize by source strategy order, then by view_count desc
-    priority_map = {name: i for i, name in enumerate(strategy_names)}
-    merged.sort(key=lambda v: (
-        priority_map.get(v.get('_source', ''), 99),
-        -(v.get('view_count') or 0)
-    ))
+    # 4. Add random jitter and sort by score
+    import random
+    for v in merged:
+        jitter = random.uniform(-0.05, 0.05)
+        v['_score'] = (v.get('_score', 0) + jitter)
     
-    # Remove internal _source field before returning
+    merged.sort(key=lambda v: -v.get('_score', 0))
+    
+    # Remove internal fields before returning
     for v in merged:
         v.pop('_source', None)
+        v.pop('_score', None)
     
-    final = merged[:20]
-    print(f"[Related] Final: {len(final)} related videos for {video_id}")
+    # Cache full results for pagination
+    full_results = merged
+    print(f"[Related] Full: {len(full_results)} related videos for {video_id}")
     
-    # 5. Cache for 10 minutes
+    # 5. Cache full results for 10 minutes
+    await cache_service.set(f"related:{video_id}:full", full_results, ttl=600)
+    
+    # Return paginated results
+    final = full_results[offset:offset + limit]
+    print(f"[Related] Returning {len(final)} items, offset={offset}")
+    
+    # Cache paginated result too
     await cache_service.set(cache_key, final, ttl=600)
     
-    return final
+    return {
+        "items": final,
+        "total": len(full_results),
+        "next_offset": offset + limit if offset + limit < len(full_results) else None
+    }

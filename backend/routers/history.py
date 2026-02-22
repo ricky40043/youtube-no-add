@@ -79,3 +79,21 @@ async def add_history(item: HistoryCreate, db: AsyncSession = Depends(get_db)):
     await db.commit()
     await db.refresh(new_entry)
     return HistoryResponse.from_orm(new_entry)
+
+@router.delete("/{user_id}/{video_id}")
+async def delete_history_item(user_id: int, video_id: str, db: AsyncSession = Depends(get_db)):
+    """Delete a specific video from user's watch history"""
+    from sqlalchemy import delete
+    stmt = delete(WatchHistory).where(WatchHistory.user_id == user_id, WatchHistory.video_id == video_id)
+    await db.execute(stmt)
+    await db.commit()
+    return {"status": "success", "message": f"Video {video_id} removed from history"}
+
+@router.delete("/{user_id}/clear")
+async def clear_history(user_id: int, db: AsyncSession = Depends(get_db)):
+    """Clear all watch history for a user"""
+    from sqlalchemy import delete
+    stmt = delete(WatchHistory).where(WatchHistory.user_id == user_id)
+    await db.execute(stmt)
+    await db.commit()
+    return {"status": "success", "message": "All watch history cleared"}

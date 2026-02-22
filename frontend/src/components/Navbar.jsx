@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { authApi, subscriptionApi } from '../services/api'
+import { authApi, subscriptionApi, searchHistoryApi } from '../services/api'
 import SearchDropdown from './SearchDropdown'
 import { addSearchHistory } from '../utils/searchHistory'
 
@@ -56,8 +56,14 @@ function Navbar() {
     }
 
     const performSearch = (query) => {
-        // Save to search history
+        // Save to search history (both local and backend if logged in)
         addSearchHistory(query)
+        
+        // Also save to backend if logged in
+        const user = authApi.getCurrentUser()
+        if (user) {
+            searchHistoryApi.add(query).catch(err => console.error('Failed to save search:', err))
+        }
 
         // Check if it's a YouTube URL or video ID
         const videoIdMatch = query.match(

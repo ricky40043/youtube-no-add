@@ -2,11 +2,13 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useParams, useNavigate, useLocation } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import { formatTimeAgo } from '../utils/date'
+import { addLocalWatchHistory } from '../utils/searchHistory'
 import VideoPlayer from '../components/VideoPlayer'
 import VideoCard from '../components/VideoCard'
 import AddToPlaylistModal from '../components/AddToPlaylistModal'
 import { videoApi, historyApi, authApi, playlistApi, subscriptionApi } from '../services/api'
 import YouTube from 'react-youtube'
+import useIsMobile from '../hooks/useIsMobile'
 
 function Watch() {
     const { videoId } = useParams()
@@ -28,7 +30,10 @@ function Watch() {
     const [embedError, setEmbedError] = useState(false)
     const [savedTime, setSavedTime] = useState(0)
     const youtubePlayerRef = useRef(null)
-    const videoTimeRef = useRef(0) // Tracks proxy player time via onTimeUpdate
+    const videoTimeRef = useRef(0)
+    
+    // Feature: Hide background playback buttons on desktop
+    const isMobile = useIsMobile(1024)
 
     const onPlayerReady = (event) => {
         youtubePlayerRef.current = event.target
@@ -67,6 +72,90 @@ function Watch() {
     // Related videos state (for auto-play when no playlist)
     const [relatedVideos, setRelatedVideos] = useState([])
     const [loadingRelated, setLoadingRelated] = useState(false)
+    const [relatedOffset, setRelatedOffset] = useState(0)
+    const [relatedHasMore, setRelatedHasMore] = useState(true)
+
+    // Load more related videos
+    const loadMoreRelatedVideos = useCallback(async () => {
+        console.log('[Watch] loadMoreRelatedVideos called, videoId:', videoId, 'playlistId:', playlistId, 'loading:', loadingRelated, 'hasMore:', relatedHasMore)
+        if (!videoId || playlistId || loadingRelated || !relatedHasMore) {
+            console.log('[Watch] loadMoreRelatedVideos early return')
+            return
+        }
+        
+        setLoadingRelated(true)
+        try {
+            const data = await videoApi.getRelated(videoId, 20, relatedOffset)
+            console.log('[Watch] Related API returned:', data)
+            
+            // Handle both array and object formats
+            let items = []
+            if (Array.isArray(data)) {
+                items = data
+            } else if (data && Array.isArray(data.items)) {
+                items = data.items
+            }
+            
+            if (relatedOffset === 0) {
+                setRelatedVideos(items)
+            } else {
+                setRelatedVideos(prev => [...prev, ...items])
+            }
+            
+            // Handle pagination
+            if (data && typeof data === 'object' && 'next_offset' in data) {
+                setRelatedHasMore(data.next_offset !== null)
+                setRelatedOffset(data.next_offset || relatedOffset + 20)
+            } else {
+                // API returns all at once, no more after first load
+                setRelatedHasMore(false)
+            }
+        } catch (err) {
+            console.error('[Watch] Failed to load related videos', err)
+        } finally {
+            setLoadingRelated(false)
+        }
+    }, [videoId, playlistId, loadingRelated, relatedHasMore, relatedOffset])
+
+    // Refresh related videos (reset and load)
+    const refreshRelatedVideos = useCallback(() => {
+        if (!videoId || playlistId) return
+        setRelatedOffset(0)
+        setRelatedHasMore(true)
+        loadMoreRelatedVideos()
+    }, [videoId, playlistId, loadMoreRelatedVideos])
+
+    // Reset AND reload related videos when videoId changes
+    useEffect(() => {
+        console.log('[Watch] Video changed, resetting related videos for:', videoId)
+        setRelatedVideos([])
+        setRelatedOffset(0)
+        setRelatedHasMore(true)
+        
+        // Load new related videos for the new video directly
+        if (videoId && !playlistId) {
+            console.log('[Watch] Loading related videos for:', videoId)
+            setLoadingRelated(true)
+            videoApi.getRelated(videoId, 20, 0)
+                .then(data => {
+                    console.log('[Watch] Related API returned:', data)
+                    let items = []
+                    if (Array.isArray(data)) {
+                        items = data
+                    } else if (data && Array.isArray(data.items)) {
+                        items = data.items
+                    }
+                    setRelatedVideos(items)
+                    setRelatedHasMore(false) // No pagination
+                })
+                .catch(err => {
+                    console.error('[Watch] Failed to load related videos', err)
+                })
+                .finally(() => {
+                    setLoadingRelated(false)
+                })
+        }
+    }, [videoId, playlistId])
 
     // Subscription State
     const [isSubscribed, setIsSubscribed] = useState(false)
@@ -234,29 +323,30 @@ function Watch() {
 
 
                 // Fetch related videos (background)
+                console.log('[Watch] About to load related, playlistId:', playlistId)
                 if (!playlistId) {
-                    setLoadingRelated(true)
-                    videoApi.getRelated(videoId)
-                        .then(related => {
-                            console.log('[Watch] Related videos loaded:', related.length)
-                            setRelatedVideos(related)
-                        })
-                        .catch(err => console.warn('[Watch] Failed to load related videos', err))
-                        .finally(() => setLoadingRelated(false))
+                    loadMoreRelatedVideos()
                 }
 
                 // Record to watch history
                 const user = authApi.getCurrentUser()
-                if (user && info) {
+                if (info) {
                     console.log('[Watch] Saving history...')
-                    historyApi.add({
-                        user_id: user.id || 1,
-                        video_id: videoId,
-                        title: info.title,
-                        thumbnail: info.thumbnail,
-                        progress_seconds: 0
-                    }).then(() => console.log('[Watch] History saved'))
-                        .catch(err => console.log('[Watch] History save failed:', err))
+                    
+                    // Always save to local watch history (for non-logged in users)
+                    addLocalWatchHistory(videoId, info.title, info.thumbnail)
+                    
+                    // If logged in, also save to server
+                    if (user) {
+                        historyApi.add({
+                            user_id: user.id || 1,
+                            video_id: videoId,
+                            title: info.title,
+                            thumbnail: info.thumbnail,
+                            progress_seconds: 0
+                        }).then(() => console.log('[Watch] History saved'))
+                            .catch(err => console.log('[Watch] History save failed:', err))
+                    }
                 }
             } catch (err) {
                 console.error('[Watch] Failed to fetch video:', err)
@@ -267,6 +357,12 @@ function Watch() {
         }
 
         fetchVideo()
+    }, [videoId])
+
+    // Scroll to top when video changes
+    useEffect(() => {
+        console.log('[Watch] Video changed, scrolling to top')
+        window.scrollTo(0, 0)
     }, [videoId])
 
     // Stabilize the iframe URL to prevent unnecessary reloads during UI re-renders
@@ -465,8 +561,8 @@ function Watch() {
             animate={{ opacity: 1 }}
             transition={{ duration: 0.3 }}
         >
-            {/* Full-screen loading overlay when navigating between videos to keep player mounted */}
-            {loading && videoInfo && (
+            {/* Full-screen loading overlay only for initial load (no videoInfo yet) */}
+            {loading && !videoInfo && (
                 <div style={{
                     position: 'fixed',
                     inset: 0,
@@ -714,49 +810,47 @@ function Watch() {
                                     </button>
                                 )}
 
-                                {/* Fake Lock Screen Button (Always visible) */}
-                                <button
-                                    className="action-button lock-screen-btn"
-                                    onClick={() => {
-                                        if (useEmbed) {
-                                            // Capture Time from YouTube
-                                            let currentTime = 0
-                                            if (youtubePlayerRef.current && typeof youtubePlayerRef.current.getCurrentTime === 'function') {
-                                                currentTime = youtubePlayerRef.current.getCurrentTime()
-                                            }
-                                            setSavedTime(currentTime)
-                                            // Force Audio Mode
-                                            localStorage.setItem('backgroundMode', 'true')
-                                            // Switch to Proxy Player
-                                            setUseEmbed(false)
-                                            localStorage.setItem('playerMode', 'proxy')
+                                {/* Fake Lock Screen Button - Only show on mobile */}
+                                {isMobile && (
+                                    <button
+                                        className="action-button lock-screen-btn"
+                                        onClick={() => {
+                                            if (useEmbed) {
+                                                let currentTime = 0
+                                                if (youtubePlayerRef.current && typeof youtubePlayerRef.current.getCurrentTime === 'function') {
+                                                    currentTime = youtubePlayerRef.current.getCurrentTime()
+                                                }
+                                                setSavedTime(currentTime)
+                                                localStorage.setItem('backgroundMode', 'true')
+                                                setUseEmbed(false)
+                                                localStorage.setItem('playerMode', 'proxy')
 
-                                            // Wait for Proxy Player to mount then trigger lock screen
-                                            setTimeout(() => {
+                                                setTimeout(() => {
+                                                    window.dispatchEvent(new CustomEvent('triggerFakeLockScreen'))
+                                                }, 100)
+                                            } else {
                                                 window.dispatchEvent(new CustomEvent('triggerFakeLockScreen'))
-                                            }, 100)
-                                        } else {
-                                            window.dispatchEvent(new CustomEvent('triggerFakeLockScreen'))
-                                        }
-                                    }}
-                                    title="啟動 OELD 隱藏畫面"
-                                    style={{
-                                        background: '#111',
-                                        color: '#fff',
-                                        border: '1px solid #555',
-                                        display: 'flex',
-                                        alignItems: 'center',
-                                        gap: '6px',
-                                        marginLeft: useEmbed ? '0' : '8px'
-                                    }}
-                                >
-                                    <img
-                                        src="https://api.iconify.design/material-symbols-light/background-replace-rounded.svg?color=white"
-                                        alt="Fake Lock Screen Icon"
-                                        style={{ width: '18px', height: '18px' }}
-                                    />
-                                    假背景播放
-                                </button>
+                                            }
+                                        }}
+                                        title="啟動 OELD 隱藏畫面"
+                                        style={{
+                                            background: '#111',
+                                            color: '#fff',
+                                            border: '1px solid #555',
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            gap: '6px',
+                                            marginLeft: useEmbed ? '0' : '8px'
+                                        }}
+                                    >
+                                        <img
+                                            src="https://api.iconify.design/material-symbols-light/background-replace-rounded.svg?color=white"
+                                            alt="Fake Lock Screen Icon"
+                                            style={{ width: '18px', height: '18px' }}
+                                        />
+                                        假背景播放
+                                    </button>
+                                )}
 
                                 {playlistId && (
                                     <button
@@ -885,6 +979,9 @@ function Watch() {
                         </div>
                     ) : (
                         <div className="related-videos">
+                            <div style={{ padding: '12px 16px 8px' }}>
+                                <span style={{ fontSize: '0.95rem', fontWeight: '600' }}>相關影片</span>
+                            </div>
                             {loadingRelated ? (
                                 <div style={{ padding: '40px 20px', textAlign: 'center', color: '#aaa' }}>
                                     <div className="loading-spinner" style={{
@@ -899,13 +996,44 @@ function Watch() {
                                     載入相關影片...
                                 </div>
                             ) : relatedVideos.length > 0 ? (
-                                relatedVideos.map(video => (
-                                    <VideoCard key={video.id} video={video} type="horizontal" />
-                                ))
+                                <>
+                                    {relatedVideos.map(video => (
+                                        <VideoCard key={video.id} video={video} type="horizontal" />
+                                    ))}
+                                    {/* Load More Related Videos Button */}
+                                    {relatedHasMore && !loadingRelated && (
+                                        <button 
+                                            onClick={loadMoreRelatedVideos}
+                                            style={{ 
+                                                display: 'block', 
+                                                margin: '16px auto', 
+                                                padding: '10px 20px',
+                                                background: 'var(--accent)',
+                                                color: 'white',
+                                                border: 'none',
+                                                borderRadius: '20px',
+                                                cursor: 'pointer',
+                                                fontSize: '13px'
+                                            }}
+                                        >
+                                            載入更多相關影片
+                                        </button>
+                                    )}
+
+                                    {!relatedHasMore && relatedVideos.length > 0 && !loadingRelated && (
+                                        <div style={{ textAlign: 'center', padding: '16px', color: '#666', fontSize: '13px' }}>
+                                            沒有更多相關影片了
+                                        </div>
+                                    )}
+                                </>
                             ) : (
-                                <div style={{ padding: '60px 20px', textAlign: 'center', color: '#666', fontSize: '0.9rem' }}>
-                                    無相關影片
-                                </div>
+                                <>
+                                    {!loadingRelated && !relatedHasMore && (
+                                        <div style={{ padding: '60px 20px', textAlign: 'center', color: '#666', fontSize: '0.9rem' }}>
+                                            無法載入更多
+                                        </div>
+                                    )}
+                                </>
                             )}
                         </div>
                     )}

@@ -50,3 +50,6 @@ iOS 的凍結機制
 iOS 在關螢幕的瞬間，JavaScript 的執行權會被迅速收回。如果你的 switchToBackgroundPlayer 函式裡面有 fetch 或 await，可能會來不及執行。務必確保該函式是同步 (Synchronous) 執行的，或者只做最小限度的 State Update。
 
 你可以把上面的指令貼給 AI，它生成的 Code 應該會包含 document.addEventListener("visibilitychange", ...) 和 YouTube API 的整合，直接能用。
+
+
+ＡＡＡ

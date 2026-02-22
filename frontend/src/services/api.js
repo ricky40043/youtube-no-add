@@ -28,8 +28,10 @@ export const videoApi = {
     },
 
     // Get related videos
-    getRelated: async (videoId) => {
-        const response = await api.get(`/api/video/related/${encodeURIComponent(videoId)}`)
+    getRelated: async (videoId, limit = 20, offset = 0) => {
+        const response = await api.get(`/api/video/related/${encodeURIComponent(videoId)}`, {
+            params: { limit, offset }
+        })
         return response.data
     },
 }
@@ -58,6 +60,37 @@ export const searchApi = {
         })
         return response.data.suggestions
     },
+
+    // Get search related recommendations
+    getRelated: async (query, limit = 10, offset = 0) => {
+        const response = await api.get('/api/search/related', {
+            params: { q: query, limit, offset }
+        })
+        return response.data.results
+    },
+}
+
+export const searchHistoryApi = {
+    get: async (limit = 20) => {
+        const response = await api.get('/api/search-history', {
+            params: { limit }
+        })
+        return response.data
+    },
+    add: async (query) => {
+        const response = await api.post('/api/search-history', null, {
+            params: { query }
+        })
+        return response.data
+    },
+    delete: async (historyId) => {
+        const response = await api.delete(`/api/search-history/${historyId}`)
+        return response.data
+    },
+    clear: async () => {
+        const response = await api.delete('/api/search-history')
+        return response.data
+    },
 }
 
 export const historyApi = {
@@ -68,6 +101,14 @@ export const historyApi = {
     add: async (data) => {
         // data: { user_id, video_id, title, thumbnail, progress_seconds }
         const response = await api.post('/api/history/', data)
+        return response.data
+    },
+    deleteItem: async (userId, videoId) => {
+        const response = await api.delete(`/api/history/${userId}/${encodeURIComponent(videoId)}`)
+        return response.data
+    },
+    clearAll: async (userId) => {
+        const response = await api.delete(`/api/history/${userId}/clear`)
         return response.data
     }
 }
@@ -109,6 +150,8 @@ export const playlistApi = {
 
 
 
+
+
 export const subscriptionApi = {
     getAll: async () => {
         const response = await api.get('/api/subscriptions/')
@@ -145,8 +188,9 @@ export const subscriptionApi = {
 
 // Feed / Recommendation API
 export const feedApi = {
-    getFeed: async (cursor, limit = 50) => {
-        const response = await api.get('/api/feed/', { params: { cursor, limit } })
+    getFeed: async (cursor, limit = 20) => {
+        const params = { cursor, limit }
+        const response = await api.get('/api/feed/', { params })
         return response.data
     },
     sync: async () => {
@@ -195,18 +239,14 @@ export const authApi = {
         const token = localStorage.getItem('token')
         const username = localStorage.getItem('username')
         const userId = localStorage.getItem('userId')
-        // Guest Mode fallback (for personal single-user instance)
-        if (!token) {
-            return {
-                username: 'Guest',
-                token: null,
-                id: 1 // Default to ID 1
-            }
+        
+        if (!token || !userId) {
+            return null  // Not logged in
         }
         return {
             username,
             token,
-            id: userId ? parseInt(userId) : null
+            id: parseInt(userId)
         }
     }
 }

@@ -77,3 +77,61 @@ async def get_suggestions(
     ]))[:5]
     
     return {"suggestions": suggestions}
+
+
+@router.get("/related")
+async def get_search_related(
+    q: str = Query(..., description="搜尋關鍵字"),
+    limit: int = Query(10, ge=1, le=20, description="推薦數量"),
+    offset: int = Query(0, ge=0, description="分頁偏移")
+):
+    """
+    獲取搜尋關聯推薦（基於關鍵字擴展）
+    
+    - **q**: 原始搜尋關鍵字
+    - **limit**: 返回的推薦數量
+    - **offset**: 分頁偏移
+    """
+    import jieba
+    import random
+    
+    # Extract keywords using jieba
+    words = list(jieba.cut(q))
+    # Filter meaningful words (length > 1)
+    keywords = [w for w in words if len(w) > 1]
+    
+    if not keywords:
+        return {"results": []}
+    
+    # Use different keyword combinations for more diversity
+    # Try different subsets of keywords
+    all_results = []
+    keyword_subsets = [
+        keywords[:3],  # First 3 keywords
+        keywords[-3:] if len(keywords) >= 3 else keywords,  # Last 3 keywords
+        keywords[::2] if len(keywords) > 2 else keywords,  # Every other keyword
+    ]
+    
+    for kw_subset in keyword_subsets:
+        if not kw_subset:
+            continue
+        query = " ".join(kw_subset)
+        try:
+            results = await ytdlp_service.search(query, max_results=30)
+            all_results.extend(results)
+        except Exception as e:
+            print(f"[Search Related] Search failed for query '{query}': {e}")
+    
+    # Remove duplicates by id
+    seen_ids = set()
+    unique_results = []
+    for video in all_results:
+        vid = video.get('id')
+        if vid and vid not in seen_ids:
+            seen_ids.add(vid)
+            unique_results.append(video)
+    
+    # Shuffle for randomness
+    random.shuffle(unique_results)
+    
+    return {"results": unique_results[offset:offset + limit]}

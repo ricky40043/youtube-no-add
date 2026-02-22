@@ -344,20 +344,24 @@ class YtDlpService:
                 # entries might contain None for skipped items or errors
                 entries = [e for e in info['entries'] if e]
                 
-                # 2. Parallel fetch of details
-                tasks = []
+                # For feed recommendations: return flat info without fetching details
+                # This is MUCH faster (no extra API calls)
+                results = []
                 for entry in entries:
                     if entry and entry.get('id'):
-                        tasks.append(self.get_video_info(entry['id']))
+                        results.append({
+                            'id': entry.get('id'),
+                            'title': entry.get('title'),
+                            'thumbnail': entry.get('thumbnails', [{}])[0].get('url') if entry.get('thumbnails') else None,
+                            'duration': entry.get('duration'),
+                            'author': entry.get('uploader'),
+                            'channel_id': entry.get('channel_id'),
+                            'view_count': entry.get('view_count'),
+                            'published_at': entry.get('upload_date'),
+                        })
                 
-                # Limit concurrency if needed
-                results_with_none = await asyncio.gather(*tasks)
-                
-                # Filter failed fetches
-                results = [r for r in results_with_none if r]
-                
-                # 3. Sort by published_at desc
-                results.sort(key=lambda x: x.get('published_at') or '', reverse=True)
+                # Sort by view_count desc for popularity
+                results.sort(key=lambda x: x.get('view_count') or 0, reverse=True)
                 
                 return results
         except Exception as e:
@@ -410,10 +414,19 @@ class YtDlpService:
         return formatted_subs
 
     def _format_date(self, date_str: Optional[str]) -> Optional[str]:
-        """Convert YYYYMMDD to YYYY-MM-DD"""
-        if not date_str or len(date_str) != 8:
+        """Convert various date formats (YYYYMMDD, ISO) to YYYY-MM-DD"""
+        if not date_str:
             return None
-        return f"{date_str[:4]}-{date_str[4:6]}-{date_str[6:]}"
+        
+        # Handle YYYYMMDD (yt-dlp default upload_date)
+        if len(date_str) == 8 and date_str.isdigit():
+            return f"{date_str[:4]}-{date_str[4:6]}-{date_str[6:]}"
+        
+        # Handle ISO-like formats (e.g. 2026-02-21T00:00:00)
+        if 'T' in date_str or '-' in date_str:
+            return date_str[:10]
+            
+        return date_str
 
     async def get_playlist_info(self, playlist_url: str) -> Optional[Dict[str, Any]]:
         """Get playlist metadata and items"""
@@ -562,7 +575,9 @@ class YtDlpService:
                                 "duration": entry.get('duration'),
                                 "view_count": entry.get('view_count'),
                                 "duration": entry.get('duration'),
-                                "published_at": entry.get('upload_date') or entry.get('release_date')
+                                "view_count": entry.get('view_count'),
+                                "duration": entry.get('duration'),
+                                "published_at": self._format_date(entry.get('upload_date') or entry.get('release_date'))
                             })
                 return results
         except Exception as e:

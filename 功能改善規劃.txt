@@ -1,0 +1,322 @@
+================================================================================
+                    YouTube No-Ads 四大功能改善規劃
+                       日期：2026-02-21
+================================================================================
+
+目標：
+  1. 刪除觀看紀錄按鈕更明顯
+  2. 非手機模式不顯示背景播放相關按鈕
+  3. 首頁 & 搜尋頁的無限捲動（Infinite Scroll）穩定可靠
+  4. 搜尋後/觀看頁的相關影片推薦邏輯改善（參考 YouTube 演算法）
+
+
+================================================================================
+功能一：刪除觀看紀錄按鈕更明顯
+================================================================================
+
+【現狀問題】
+  - 目前 History.jsx 的「刪除」按鈕 (✕) 只有 24×24 像素
+  - CSS 預設 opacity: 0，只有在桌面版 hover 時才顯示
+  - 手機上完全無法觸發 hover → 完全看不到刪除按鈕
+  - 「清空全部」按鈕同樣較不醒目（灰底白字，容易被忽略）
+
+【修改方案】
+
+  A. 單筆刪除按鈕:
+     ┌──────────────────────────────────────────────────┐
+     │ 1. 改為「固定可見」— 移除 opacity:0 邏輯          │
+     │ 2. 增加尺寸 — 從 24×24 放大至 32×32              │
+     │ 3. 增加「🗑️ 刪除」文字標籤（可選，至少在手機版顯示）│
+     │ 4. 使用紅色系背景 (rgba(255,0,0,0.7))            │
+     │ 5. 加入 hover 時的放大效果 (transform: scale(1.1))│
+     │ 6. 手機版始終顯示，電腦版可保持 hover 顯示         │
+     └──────────────────────────────────────────────────┘
+
+  B. 清空全部按鈕:
+     ┌──────────────────────────────────────────────────┐
+     │ 1. 改用紅色系配色（紅底白字，或白底紅字帶紅框）     │
+     │ 2. 字體加粗 + 增加 padding                       │
+     │ 3. 加入垃圾桶 icon (🗑️) 做輔助辨識               │
+     │ 4. 增加確認彈窗 → 改用自訂 ConfirmModal 元件      │
+     │    (取代 window.confirm，視覺更一致)               │
+     └──────────────────────────────────────────────────┘
+
+【涉及檔案】
+  - frontend/src/pages/History.jsx     ← 主要修改
+  - frontend/src/components/ConfirmModal.jsx ← 如需自訂確認彈窗
+
+
+================================================================================
+功能二：非手機模式隱藏背景播放按鈕
+================================================================================
+
+【現狀問題】
+  - Watch.jsx 中有三個與背景播放相關的按鈕：
+    • 「🎧 切換純音樂」(line ~683) — 在 YouTube Embed 模式下顯示
+    • 「假背景播放」(line ~717)         — 始終顯示（含假鎖屏功能）
+    • 切換 YouTube / Proxy 播放器的按鈕 — 也與背景播放模式相關
+  - 這些功能主要是為了手機版的 iOS 螢幕關閉時能繼續聽音樂
+  - 在桌面版上完全不需要且可能造成混淆
+
+【修改方案】
+  ┌──────────────────────────────────────────────────┐
+  │ 1. 建立 isMobile 偵測邏輯：                       │
+  │    使用 useMediaQuery 或 window.matchMedia        │
+  │    判斷 max-width: 768px 或 1024px                │
+  │    加上 navigator.userAgent 偵測 iOS/Android      │
+  │                                                    │
+  │ 2. 條件式渲染：                                    │
+  │    {isMobile && (                                  │
+  │      <button>🎧 切換純音樂</button>                │
+  │      <button>假背景播放</button>                    │
+  │    )}                                              │
+  │                                                    │
+  │ 3. 可選：建立 useIsMobile() 自訂 Hook              │
+  │    放在 frontend/src/hooks/useIsMobile.js          │
+  │    讓其他元件也能共用                               │
+  └──────────────────────────────────────────────────┘
+
+【涉及檔案】
+  - frontend/src/pages/Watch.jsx           ← 主要修改
+  - frontend/src/hooks/useIsMobile.js      ← 新增 Hook
+
+
+================================================================================
+功能三：無限捲動（Infinite Scroll）修復
+================================================================================
+
+【現狀問題 — Home.jsx】
+  - 使用 IntersectionObserver 掛在最後一個影片元素 (lastVideoElementRef)
+  - fetchFeed 函式不是 useCallback，導致 stale closure（閉包過時）
+    → Observer 閉包中的 cursor / hasMore 可能是舊值
+    → 造成重複請求或完全無法觸發載入
+  - IntersectionObserver 的依賴陣列中包含 fetchFeed
+    但 fetchFeed 每次 render 都會重新建立 → 導致 observer 不斷被銷毀重建
+  - loading 狀態鎖會阻止 observer 觸發，但有時 loading 在 fetchFeed
+    完成時已經為 false，造成 observer callback 直接被跳過
+
+【現狀問題 — Search.jsx】
+  - 使用 sentinel div (id="scroll-sentinel") + IntersectionObserver
+  - loadMore 函式同樣不是 useCallback → 會有 stale closure
+  - useEffect 依賴 [loading, hasMore, offset, videos.length]
+    每次狀態變化 observer 被重建 → 可能造成競態條件 (race condition)
+
+【修改方案 — 穩定的無限捲動架構】
+
+  核心原則：
+  ┌──────────────────────────────────────────────────┐
+  │ 1. 使用 useRef 儲存可變狀態（cursor, hasMore,     │
+  │    loading），避免 stale closure                   │
+  │ 2. 將 loadMore / fetchFeed 包裝為 useCallback     │
+  │ 3. Observer 的 callback 讀取 ref 而非 state       │
+  │ 4. Observer 只建立一次，target 改變時用 observe/   │
+  │    unobserve 切換，不重建 observer 本身             │
+  │ 5. 加入 debounce 或 isLoadingRef 鎖，防止連續觸發  │
+  └──────────────────────────────────────────────────┘
+
+  具體程式碼架構（以 Home.jsx 為例）：
+
+  // === 使用 Ref 管理可變狀態 ===
+  const cursorRef = useRef(null)
+  const hasMoreRef = useRef(true)
+  const isLoadingRef = useRef(false)
+
+  // === 穩定的 fetchFeed 函式 ===
+  const fetchFeed = useCallback(async (init = false) => {
+    if (isLoadingRef.current) return       // 防止重複觸發
+    if (!init && !hasMoreRef.current) return // 沒有更多了
+    isLoadingRef.current = true
+    setLoading(true)
+
+    try {
+      const data = await feedApi.getFeed(
+        init ? null : cursorRef.current,
+        getRecentSearchQueries(5)
+      )
+      if (init) {
+        setVideos(data.items || [])
+      } else {
+        setVideos(prev => [...prev, ...(data.items || [])])
+      }
+      cursorRef.current = data.next_cursor
+      hasMoreRef.current = !!data.next_cursor
+      setHasMore(!!data.next_cursor)  // 同步更新 state 用於 UI
+      setCursor(data.next_cursor)
+    } catch (err) {
+      console.error(err)
+    } finally {
+      isLoadingRef.current = false
+      setLoading(false)
+    }
+  }, [])  // ✅ 空依賴，函式不會被重建
+
+  // === 穩定的 Observer ===
+  const observerRef = useRef(null)
+  const sentinelRef = useRef(null)
+
+  useEffect(() => {
+    observerRef.current = new IntersectionObserver(entries => {
+      if (entries[0].isIntersecting && !isLoadingRef.current && hasMoreRef.current) {
+        fetchFeed(false)
+      }
+    }, { rootMargin: '400px', threshold: 0 })
+
+    return () => observerRef.current?.disconnect()
+  }, [fetchFeed])
+
+  // === Sentinel div 方式（推薦） ===
+  // 在 video-grid 下方固定放一個 sentinel div
+  useEffect(() => {
+    const sentinel = sentinelRef.current
+    if (sentinel && observerRef.current) {
+      observerRef.current.observe(sentinel)
+      return () => observerRef.current?.unobserve(sentinel)
+    }
+  }, [videos.length])  // 影片列表變化時重新 observe
+
+  Search.jsx 也採用同樣架構。
+
+【手機測試重點】
+  ┌──────────────────────────────────────────────────┐
+  │ • iOS Safari: 需特別注意 rootMargin 是否生效      │
+  │ • 滑到底部後不應卡住或白屏                         │
+  │ • 快速連續滑動不會觸發重複 API 請求                │
+  │ • 沒有更多內容時顯示「沒有更多推薦了」             │
+  │ • 後端 feed.py 一次返回 20 筆，前端顯示 loading    │
+  └──────────────────────────────────────────────────┘
+
+【涉及檔案】
+  - frontend/src/pages/Home.jsx    ← 主要修改（推薦 Tab 無限捲動）
+  - frontend/src/pages/Search.jsx  ← 搜尋結果無限捲動
+
+
+================================================================================
+功能四：搜尋 & 觀看頁相關影片推薦邏輯改善
+================================================================================
+
+【現狀問題】
+  - 觀看頁 (Watch.jsx) 的「相關影片」目前呼叫 /api/video/related/{video_id}
+  - 後端 video.py 的 get_related_videos() 使用了 5 個策略，但實際只啟用了 2 個：
+    • strategy_channel() — 同頻道影片
+    • strategy_clean_title() — 清洗標題後搜尋
+  - 其他 3 個策略（Tags、Category、Author）已定義但未執行
+    → 這導致推薦結果非常有限，且容易只有同頻道的影片
+  - 搜尋頁 (Search.jsx) 目前沒有「搜尋後推薦」的機制
+    → 只顯示搜尋結果，不會額外推薦相關內容
+
+【修改方案】
+
+  A. 後端 — 強化 /api/video/related/{video_id}:
+     ┌──────────────────────────────────────────────────┐
+     │ 1. 啟用全部 5 個策略（parallel 執行）             │
+     │    results = await asyncio.gather(               │
+     │      strategy_channel(),                         │
+     │      strategy_tags(),        ← 重新啟用          │
+     │      strategy_category(),    ← 重新啟用          │
+     │      strategy_author(),      ← 重新啟用          │
+     │      strategy_clean_title(),                     │
+     │      return_exceptions=True                      │
+     │    )                                             │
+     │                                                   │
+     │ 2. 加入「加權混排」邏輯（參考 YouTube 演算法）：   │
+     │    - 同頻道影片：佔 30%（max 6 部）               │
+     │    - Tags 相關：佔 25%（max 5 部）               │
+     │    - 分類 + 關鍵字：佔 20%（max 4 部）           │
+     │    - 作者搜尋：佔 15%（max 3 部）               │
+     │    - 標題清洗搜尋：佔 10%（max 2 部）            │
+     │    → 確保推薦來源多元，降低「資訊繭房」效應      │
+     │                                                   │
+     │ 3. 用觀看次數 + 發布日期做二次排序               │
+     │    score = view_count_score * 0.6                │
+     │            + recency_score * 0.4                 │
+     │                                                   │
+     │ 4. 加入隨機抖動 (Jitter):                        │
+     │    在最終排序分數上加 random.uniform(-0.05, 0.05) │
+     │    每次刷新看到的順序略有不同                     │
+     │                                                   │
+     │ 5. 過濾：排除已觀看影片（如果使用者已登入）       │
+     │    讀取 WatchHistory，排除 seen_ids               │
+     └──────────────────────────────────────────────────┘
+
+  B. 後端 — 新增搜尋關聯推薦 API:
+     ┌──────────────────────────────────────────────────┐
+     │ 新增 /api/search/related 端點                    │
+     │                                                   │
+     │ 參數: q (搜尋字串), limit (推薦數量)              │
+     │                                                   │
+     │ 邏輯：                                            │
+     │ 1. 從搜尋字串中提取關鍵字（使用 jieba 斷詞）      │
+     │ 2. 取出最重要的 3 個關鍵字                        │
+     │ 3. 將這些關鍵字組合後搜尋 YouTube                 │
+     │ 4. 與原始搜尋結果去重後返回                       │
+     │                                                   │
+     │ 或者直接利用已有的 recommendation_service.py      │
+     │ 的 TF-IDF 引擎來計算關聯度                       │
+     └──────────────────────────────────────────────────┘
+
+  C. 前端 — Search.jsx 加入「你可能也有興趣」區塊:
+     ┌──────────────────────────────────────────────────┐
+     │ 1. 搜尋結果列表之後，加入分隔區塊：               │
+     │    「── 你可能也有興趣 ──」                       │
+     │ 2. 在搜尋完成後，呼叫 /api/search/related        │
+     │ 3. 以 VideoCard 顯示推薦結果（水平或垂直排列）    │
+     │ 4. 同樣支援無限捲動載入更多                      │
+     └──────────────────────────────────────────────────┘
+
+  D. 前端 — Watch.jsx 觀看頁相關影片改善:
+     ┌──────────────────────────────────────────────────┐
+     │ 1. 將「無相關影片」改為顯示推薦影片（fallback）    │
+     │ 2. 增加「換一批」按鈕，重新呼叫 API 取得新推薦    │
+     │ 3. 限制同頻道影片最多顯示 4 部，避免推薦太單一    │
+     └──────────────────────────────────────────────────┘
+
+【涉及檔案】
+  - backend/routers/video.py                  ← related API 強化
+  - backend/routers/search.py                 ← 新增 /api/search/related 端點
+  - backend/services/recommendation_service.py ← 可選：搜尋推薦也使用 TF-IDF
+  - frontend/src/pages/Search.jsx             ← 加入推薦區塊
+  - frontend/src/pages/Watch.jsx              ← 改善 sidebar 相關影片
+  - frontend/src/services/api.js              ← 新增 searchApi.getRelated
+
+
+================================================================================
+優先順序建議
+================================================================================
+
+  優先級    功能              原因
+  ──────    ────              ────
+  🔴 P0    功能三 無限捲動    使用者反映多次失敗，是最核心的使用者體驗問題
+  🟡 P1    功能一 刪除紀錄    影響手機版使用，操作不直覺
+  🟡 P1    功能二 隱藏按鈕    清理 UI，減少桌面版困惑
+  🟢 P2    功能四 推薦強化    體驗提升，但不阻擋核心功能
+
+  建議實作順序：功能三 → 功能一 → 功能二 → 功能四
+
+
+================================================================================
+驗證計畫
+================================================================================
+
+  【功能一驗證】
+  - 手機版（iOS Safari）：確認刪除按鈕不需 hover 即可看見並點擊
+  - 桌面版：確認 hover 效果仍然正常
+  - 確認「確定刪除？」彈窗正常彈出
+
+  【功能二驗證】
+  - 手機版：確認背景播放 / 假鎖屏按鈕正常顯示
+  - 桌面版 (>1024px)：確認這些按鈕完全不渲染
+  - 縮放瀏覽器視窗：確認在斷點處正確切換
+
+  【功能三驗證】★ 重點測試 ★
+  - 桌面版 Chrome / Safari：滑到底部後應自動載入更多影片
+  - 手機版 iOS Safari：同上，且不能出現白屏或卡住
+  - 手機版 Android Chrome：同上
+  - 快速連滑到底：不應出現重複影片或重複 API 請求
+  - 到達最後一頁：應顯示「沒有更多推薦了」提示
+  - 切換 Tab（推薦/熱門/通知）：state 應正確重置
+
+  【功能四驗證】
+  - 觀看頁面側邊欄：相關影片數量應 >= 10 部
+  - 相關影片的來源應多元（不全是同頻道）
+  - 搜尋結束後：「你可能也有興趣」區塊應正確顯示
+  - 重新整理：由於加入了抖動，排序應略有變化
