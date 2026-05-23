@@ -6,7 +6,7 @@ services:
       context: ./frontend
       dockerfile: Dockerfile
     ports:
-      - "5173:5173"
+      - "20800:5173"
     volumes:
       - ./frontend:/app
       - /app/node_modules
@@ -19,7 +19,7 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     ports:
-      - "8000:8000"
+      - "20801:8000"
     volumes:
       - ./backend:/app
     environment:
@@ -33,8 +33,6 @@ services:
 
   postgres:
     image: postgres:15-alpine
-    ports:
-      - "5433:5432"
     environment:
       - POSTGRES_USER=postgres
       - POSTGRES_PASSWORD=postgres
@@ -45,8 +43,6 @@ services:
 
   redis:
     image: redis:7-alpine
-    ports:
-      - "6379:6379"
     volumes:
       - redis_data:/data
 
