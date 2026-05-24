@@ -251,6 +251,18 @@ export const authApi = {
     }
 }
 
+export const downloadApi = {
+    start: async (videoId, type, title) => {
+        const response = await api.post('/api/download/start', { video_id: videoId, type, title })
+        return response.data
+    },
+    status: async (jobId) => {
+        const response = await api.get(`/api/download/status/${jobId}`)
+        return response.data
+    },
+    fileUrl: (jobId) => `${API_URL}/api/download/file/${jobId}`,
+}
+
 // Add token to requests
 api.interceptors.request.use((config) => {
     const token = localStorage.getItem('token')

@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from routers import video, search, user, playlist, history, subscription, feed
+from routers import download
 from database.connection import init_db
 
 app = FastAPI(
@@ -33,6 +34,7 @@ app.include_router(feed.router, prefix="/api/feed", tags=["Feed"])
 
 from routers.search_history import router as search_history_router
 app.include_router(search_history_router, prefix="/api/search-history", tags=["SearchHistory"])
+app.include_router(download.router, prefix="/api/download", tags=["Download"])
 
 
 @app.get("/")

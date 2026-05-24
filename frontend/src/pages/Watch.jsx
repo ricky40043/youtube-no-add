@@ -6,7 +6,7 @@ import { addLocalWatchHistory } from '../utils/searchHistory'
 import VideoPlayer from '../components/VideoPlayer'
 import VideoCard from '../components/VideoCard'
 import AddToPlaylistModal from '../components/AddToPlaylistModal'
-import { videoApi, historyApi, authApi, playlistApi, subscriptionApi } from '../services/api'
+import { videoApi, historyApi, authApi, playlistApi, subscriptionApi, downloadApi } from '../services/api'
 import YouTube from 'react-youtube'
 import useIsMobile from '../hooks/useIsMobile'
 
@@ -24,6 +24,9 @@ function Watch() {
     const [error, setError] = useState(null)
     const [playlistError, setPlaylistError] = useState(null) // New error state
     const [showPlaylistModal, setShowPlaylistModal] = useState(false)
+    const [showDownloadModal, setShowDownloadModal] = useState(false)
+    const [downloadJob, setDownloadJob] = useState(null) // { jobId, type, status, progress, message }
+    const downloadPollRef = useRef(null)
 
     // Feature B: Persist Player Mode (default to Embed)
     const [useEmbed, setUseEmbed] = useState(() => localStorage.getItem('playerMode') !== 'proxy')
@@ -215,6 +218,38 @@ function Watch() {
         } catch (err) {
             console.error(err)
             alert('操作失敗')
+        }
+    }
+
+    const handleStartDownload = async (type) => {
+        setDownloadJob({ type, status: 'pending', progress: 0, message: '準備下載...' })
+        try {
+            const { job_id } = await downloadApi.start(videoId, type, videoInfo?.title || videoId)
+            setDownloadJob(prev => ({ ...prev, jobId: job_id }))
+
+            downloadPollRef.current = setInterval(async () => {
+                try {
+                    const data = await downloadApi.status(job_id)
+                    setDownloadJob(prev => ({ ...prev, ...data, jobId: job_id }))
+                    if (data.status === 'completed') {
+                        clearInterval(downloadPollRef.current)
+                        // Trigger browser download
+                        const a = document.createElement('a')
+                        a.href = downloadApi.fileUrl(job_id)
+                        a.download = data.filename || `download${data.ext || ''}`
+                        document.body.appendChild(a)
+                        a.click()
+                        document.body.removeChild(a)
+                    } else if (data.status === 'error') {
+                        clearInterval(downloadPollRef.current)
+                    }
+                } catch {
+                    clearInterval(downloadPollRef.current)
+                    setDownloadJob(prev => ({ ...prev, status: 'error', message: '無法取得下載狀態' }))
+                }
+            }, 1500)
+        } catch (err) {
+            setDownloadJob(prev => ({ ...prev, status: 'error', message: '啟動下載失敗' }))
         }
     }
 
@@ -871,6 +906,9 @@ function Watch() {
                                         {formatTimeAgo(videoInfo.published_at)}
                                     </span>
                                 )}
+                                <button className="action-button" onClick={() => setShowDownloadModal(true)} style={{ background: '#1a73e8', color: '#fff' }}>
+                                    <img src="https://api.iconify.design/mdi/download.svg?color=white" alt="Download" style={{ width: '18px', height: '18px' }} /> 下載
+                                </button>
                                 <button className="action-button" onClick={() => {
                                     navigator.clipboard.writeText(window.location.href)
                                     alert('連結已複製!')
@@ -1243,6 +1281,100 @@ function Watch() {
                 onClose={() => setShowPlaylistModal(false)}
                 videoInfo={videoInfo}
             />
+
+            {showDownloadModal && (
+                <div style={{
+                    position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)',
+                    zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center'
+                }} onClick={(e) => { if (e.target === e.currentTarget) { setShowDownloadModal(false); clearInterval(downloadPollRef.current); setDownloadJob(null) } }}>
+                    <div style={{
+                        background: '#1e1e1e', borderRadius: '16px', padding: '28px 24px',
+                        width: '320px', border: '1px solid #333', position: 'relative'
+                    }}>
+                        <h3 style={{ margin: '0 0 20px', fontSize: '1.1rem', textAlign: 'center' }}>下載</h3>
+                        <p style={{ margin: '0 0 20px', fontSize: '0.85rem', color: '#aaa', textAlign: 'center', wordBreak: 'break-word' }}>
+                            {videoInfo?.title}
+                        </p>
+
+                        {!downloadJob ? (
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                                <button
+                                    onClick={() => handleStartDownload('audio')}
+                                    style={{
+                                        background: '#4CAF50', color: '#fff', border: 'none',
+                                        borderRadius: '12px', padding: '14px', fontSize: '1rem',
+                                        fontWeight: 'bold', cursor: 'pointer', display: 'flex',
+                                        alignItems: 'center', justifyContent: 'center', gap: '8px'
+                                    }}
+                                >
+                                    🎵 下載音樂 (MP3)
+                                </button>
+                                <button
+                                    onClick={() => handleStartDownload('video')}
+                                    style={{
+                                        background: '#1a73e8', color: '#fff', border: 'none',
+                                        borderRadius: '12px', padding: '14px', fontSize: '1rem',
+                                        fontWeight: 'bold', cursor: 'pointer', display: 'flex',
+                                        alignItems: 'center', justifyContent: 'center', gap: '8px'
+                                    }}
+                                >
+                                    🎬 下載影片 (MP4)
+                                </button>
+                            </div>
+                        ) : (
+                            <div style={{ textAlign: 'center' }}>
+                                {downloadJob.status === 'error' ? (
+                                    <>
+                                        <div style={{ fontSize: '2rem', marginBottom: '12px' }}>❌</div>
+                                        <p style={{ color: '#f44336', marginBottom: '16px' }}>{downloadJob.message}</p>
+                                        <button
+                                            onClick={() => setDownloadJob(null)}
+                                            style={{ background: '#333', color: '#fff', border: 'none', borderRadius: '8px', padding: '10px 20px', cursor: 'pointer' }}
+                                        >
+                                            重試
+                                        </button>
+                                    </>
+                                ) : downloadJob.status === 'completed' ? (
+                                    <>
+                                        <div style={{ fontSize: '2rem', marginBottom: '12px' }}>✅</div>
+                                        <p style={{ color: '#4CAF50', marginBottom: '16px' }}>下載完成！檔案已儲存</p>
+                                        <button
+                                            onClick={() => { setDownloadJob(null) }}
+                                            style={{ background: '#333', color: '#fff', border: 'none', borderRadius: '8px', padding: '10px 20px', cursor: 'pointer' }}
+                                        >
+                                            關閉
+                                        </button>
+                                    </>
+                                ) : (
+                                    <>
+                                        <div style={{ marginBottom: '12px', color: '#aaa', fontSize: '0.9rem' }}>
+                                            {downloadJob.type === 'audio' ? '🎵 下載音樂中...' : '🎬 下載影片中...'}
+                                        </div>
+                                        <div style={{ background: '#333', borderRadius: '8px', height: '8px', overflow: 'hidden', marginBottom: '12px' }}>
+                                            <div style={{
+                                                height: '100%', borderRadius: '8px',
+                                                background: downloadJob.type === 'audio' ? '#4CAF50' : '#1a73e8',
+                                                width: `${downloadJob.progress || 0}%`,
+                                                transition: 'width 0.5s ease'
+                                            }} />
+                                        </div>
+                                        <p style={{ color: '#ccc', fontSize: '0.85rem', margin: 0 }}>{downloadJob.message}</p>
+                                    </>
+                                )}
+                            </div>
+                        )}
+
+                        <button
+                            onClick={() => { setShowDownloadModal(false); clearInterval(downloadPollRef.current); setDownloadJob(null) }}
+                            style={{
+                                position: 'absolute', top: '12px', right: '12px',
+                                background: 'none', border: 'none', color: '#aaa',
+                                fontSize: '1.2rem', cursor: 'pointer', lineHeight: 1
+                            }}
+                        >✕</button>
+                    </div>
+                </div>
+            )}
         </motion.div >
     )
 }
