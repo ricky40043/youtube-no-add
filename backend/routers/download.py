@@ -139,9 +139,13 @@ async def download_file(job_id: str):
     if not file_path.exists():
         raise HTTPException(status_code=404, detail="檔案不存在")
 
+    # NOTE: Do NOT set Content-Disposition manually here. HTTP headers must be
+    # Latin-1 encodable, but `filename` can contain CJK/emoji (from the video
+    # title) -> manual header crashes the response with 500 ("Internal Server
+    # Error", 21 bytes). Starlette's FileResponse handles non-ASCII filenames
+    # correctly via RFC 5987 (filename*=utf-8'') when given `filename=`.
     return FileResponse(
         path=file_path,
         filename=filename,
         media_type="application/octet-stream",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
