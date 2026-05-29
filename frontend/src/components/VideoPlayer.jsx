@@ -19,7 +19,8 @@ function VideoPlayer({
     currentVideoId,
     isShuffle = false,
     onNext,
-    onPrev
+    onPrev,
+    loopMode = false
 }) {
     const videoRef = useRef(null)
     const audioRef = useRef(null)
@@ -35,8 +36,9 @@ function VideoPlayer({
     const [backgroundMode, setBackgroundMode] = useState(() => localStorage.getItem('backgroundMode') === 'true')
     const [autoAudioOnly, setAutoAudioOnly] = useState(false) // Auto-detected audio mode (no video stream)
 
-    // Single-track loop (repeat current track) — persisted
-    const [loopMode, setLoopMode] = useState(() => localStorage.getItem('loopMode') === 'true')
+    // Single-track loop (repeat current track) — controlled by parent (Watch),
+    // so the toggle button can live outside the player. Sync to a ref for the
+    // ended handler to avoid stale closures.
     const loopRef = useRef(loopMode)
     useEffect(() => { loopRef.current = loopMode }, [loopMode])
 
@@ -1161,26 +1163,6 @@ function VideoPlayer({
                     </>
                 )}
 
-                {/* Single-track loop toggle */}
-                <button
-                    className="control-button"
-                    onClick={(e) => {
-                        e.stopPropagation()
-                        const next = !loopMode
-                        setLoopMode(next)
-                        localStorage.setItem('loopMode', String(next))
-                        setFeedback({ show: true, text: next ? '單曲循環開' : '單曲循環關', icon: '🔁' })
-                        setTimeout(() => setFeedback({ show: false, text: '', icon: null }), 800)
-                    }}
-                    title={loopMode ? '關閉單曲循環' : '開啟單曲循環'}
-                    style={{ color: loopMode ? '#ff0000' : 'white' }}
-                >
-                    {/* repeat-one icon: repeat arrows with a "1" = single-track loop */}
-                    <svg viewBox="0 0 24 24" fill="currentColor" width="22" height="22">
-                        <path d="M7 7h10v3l4-4-4-4v3H5v6h2V7zm10 10H7v-3l-4 4 4 4v-3h12v-6h-2v4zM13 15V9h-1l-2 1v1h1.5v4H13z" />
-                    </svg>
-                </button>
-
                 <div
                     className="progress-container"
                     onClick={handleSeek}
@@ -1509,23 +1491,21 @@ function VideoPlayer({
 
         .progress-handle {
             position: absolute;
-            right: -6px;
+            right: -8px;
             top: 50%;
             transform: translateY(-50%) scale(1);
-            width: 12px;
-            height: 12px;
+            width: 16px;
+            height: 16px;
             background: #ff0000;
+            border: 2px solid #fff;
             border-radius: 50%;
+            box-shadow: 0 1px 5px rgba(0,0,0,0.6);
             transition: transform 0.1s;
         }
 
         .progress-container:hover .progress-handle,
         .progress-container:active .progress-handle {
-            transform: translateY(-50%) scale(1.3);
-        }
-        
-        .progress-container:active .progress-handle {
-             transform: translateY(-50%) scale(1.3);
+            transform: translateY(-50%) scale(1.35);
         }
         
         /* Transparent hit area to make seeking easier */
@@ -1567,9 +1547,9 @@ function VideoPlayer({
           }
 
           .progress-handle {
-            width: 16px;
-            height: 16px;
-            right: -8px;
+            width: 18px;
+            height: 18px;
+            right: -9px;
           }
 
           .progress-hit-area {

@@ -30,6 +30,7 @@ function Watch() {
 
     // Feature B: Persist Player Mode (default to Embed)
     const [useEmbed, setUseEmbed] = useState(() => localStorage.getItem('playerMode') !== 'proxy')
+    const [loopMode, setLoopMode] = useState(() => localStorage.getItem('loopMode') === 'true')
     const [embedError, setEmbedError] = useState(false)
     const [savedTime, setSavedTime] = useState(0)
     const youtubePlayerRef = useRef(null)
@@ -599,12 +600,23 @@ function Watch() {
     const handleVideoEnd = useCallback(() => {
         console.log('[Watch] Video ended. Clearing progress & Checking auto-play...')
 
+        // Single-track loop: replay the current video instead of advancing.
+        // (Custom player handles loop internally; this covers YouTube embed mode.)
+        if (loopMode) {
+            const yt = youtubePlayerRef.current
+            if (yt && typeof yt.seekTo === 'function') {
+                yt.seekTo(0)
+                yt.playVideo?.()
+            }
+            return
+        }
+
         // Fix: Clear progress on end to prevent loop
         localStorage.removeItem(`progress_${videoId}`)
 
         // Use unified next logic
         goToNextVideo()
-    }, [videoId, goToNextVideo])
+    }, [videoId, goToNextVideo, loopMode])
 
     // Auto-skip on error in playlist mode only (not related videos to avoid loops)
     useEffect(() => {
@@ -806,6 +818,7 @@ function Watch() {
                                         currentVideoId={videoId}
                                         onNext={goToNextVideo}
                                         onPrev={goToPrevVideo}
+                                        loopMode={loopMode}
                                         onSwitchToYouTube={(capturedTime) => {
                                             console.log('[Switch] TV Icon clicked, switching to YouTube Embed. Time:', capturedTime)
                                             setSavedTime(capturedTime || 0)
@@ -990,6 +1003,20 @@ function Watch() {
                                         假背景播放
                                     </button>
                                 )}
+
+                                {/* Single-track loop — lives outside the player per user request */}
+                                <button
+                                    className={`action-button ${loopMode ? 'active' : ''}`}
+                                    onClick={() => {
+                                        const next = !loopMode
+                                        setLoopMode(next)
+                                        localStorage.setItem('loopMode', String(next))
+                                    }}
+                                    title={loopMode ? '關閉單曲循環' : '開啟單曲循環'}
+                                    style={{ background: loopMode ? '#fff' : 'var(--bg-secondary)', color: loopMode ? '#000' : 'inherit', display: 'flex', alignItems: 'center', gap: '6px' }}
+                                >
+                                    <img src={`https://api.iconify.design/material-symbols/repeat-one.svg?color=${loopMode ? 'black' : 'white'}`} alt="Loop" style={{ width: '18px', height: '18px' }} /> 單曲循環
+                                </button>
 
                                 {playlistId && (
                                     <button
