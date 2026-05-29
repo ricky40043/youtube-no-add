@@ -1171,10 +1171,11 @@ function VideoPlayer({
                     onTouchEnd={(e) => e.stopPropagation()}
                 >
                     <div className="progress-bar">
-                        <div className="progress-fill" style={{ width: `${progress}%` }}>
-                            <div className="progress-handle" />
-                        </div>
+                        <div className="progress-fill" style={{ width: `${progress}%` }} />
                     </div>
+                    {/* Knob lives in the container (not inside the overflow:hidden bar)
+                        so it renders as one full circle instead of a clipped sliver */}
+                    <div className="progress-handle" style={{ left: `${progress}%` }} />
                     {/* Hit area visualizer/expander */}
                     <div className="progress-hit-area" />
                 </div>
@@ -1491,9 +1492,8 @@ function VideoPlayer({
 
         .progress-handle {
             position: absolute;
-            right: -8px;
             top: 50%;
-            transform: translateY(-50%) scale(1);
+            transform: translate(-50%, -50%) scale(1);
             width: 16px;
             height: 16px;
             background: #ff0000;
@@ -1501,11 +1501,13 @@ function VideoPlayer({
             border-radius: 50%;
             box-shadow: 0 1px 5px rgba(0,0,0,0.6);
             transition: transform 0.1s;
+            z-index: 3;
+            pointer-events: none;
         }
 
         .progress-container:hover .progress-handle,
         .progress-container:active .progress-handle {
-            transform: translateY(-50%) scale(1.35);
+            transform: translate(-50%, -50%) scale(1.35);
         }
         
         /* Transparent hit area to make seeking easier */
@@ -1549,7 +1551,6 @@ function VideoPlayer({
           .progress-handle {
             width: 18px;
             height: 18px;
-            right: -9px;
           }
 
           .progress-hit-area {
