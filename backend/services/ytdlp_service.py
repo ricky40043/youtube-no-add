@@ -553,7 +553,11 @@ class YtDlpService:
             'extract_flat': False, # Get full info to ensure dates are present
             'skip_download': True,
             'playlistend': limit, # Limit number of items
-            'no_playlist': False 
+            'no_playlist': False,
+            # Skip individual entries that fail (e.g. upcoming premieres,
+            # members-only, age-restricted) instead of aborting the whole
+            # channel fetch — otherwise one premiere returns an empty feed.
+            'ignoreerrors': True,
         }
         
         try:
