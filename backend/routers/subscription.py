@@ -228,54 +228,63 @@ async def get_notifications(
     db: Session = Depends(get_db)
 ):
     """
-    Get videos from subscribed channels with notifications enabled, 
-    published within the last 24 hours.
+    Get recent uploads (last 7 days) from subscribed channels that have
+    notifications enabled. Fetches in real-time per channel (no dependency on
+    the SyncService having populated the Videos table) and caches per user.
     """
-    # 1. Get channels with notifications enabled
+    cache_key = f"subs_notifications:{current_user.id}"
+    cached = await cache_service.get(cache_key)
+    if cached is not None:
+        return cached
+
+    # 1. Channels with notifications enabled
     stmt = select(Subscription).filter(
         Subscription.user_id == current_user.id,
         Subscription.notify_enabled == True
     )
     result = await db.execute(stmt)
     subs = result.scalars().all()
-    
+
     if not subs:
         return []
-        
-    target_channel_ids = [sub.channel_id for sub in subs]
-    
-    # 2. Query Videos table for these channels, published in last 24h
-    # Note: We rely on the SyncService/Background tasks to populate 'videos' table.
-    from database.models import Video
+
+    name_map = {s.channel_id: s.channel_name for s in subs}
+
+    # 2. Real-time fetch latest uploads per channel (parallel)
+    import asyncio
     from datetime import timedelta
-    
-    # Relaxed to 7 days to ensure users see notifications during testing/low volume
-    twenty_four_hours_ago = datetime.utcnow() - timedelta(days=7)
-    
-    video_stmt = select(Video).filter(
-        Video.channel_id.in_(target_channel_ids),
-        Video.published_at >= twenty_four_hours_ago
-    ).order_by(desc(Video.published_at))
-    
-    video_res = await db.execute(video_stmt)
-    videos = video_res.scalars().all()
-    
-    # 3. Convert to VideoFeedItem
+    tasks = [ytdlp_service.get_channel_latest_videos(s.channel_id, limit=5) for s in subs[:30]]
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    # 3. Keep only uploads from the last 7 days (published_at is 'YYYY-MM-DD')
+    cutoff = (datetime.utcnow() - timedelta(days=7)).strftime("%Y-%m-%d")
     feed_items = []
-    for v in videos:
-        # We need author name, usually stored in Subscription or Channel table.
-        # Simple lookup map from our subs list
-        channel_name_map = {s.channel_id: s.channel_name for s in subs}
-        
-        feed_items.append(VideoFeedItem(
-            id=v.id,
-            title=v.title,
-            thumbnail=f"https://i.ytimg.com/vi/{v.id}/mqdefault.jpg", # Fallback logic
-            author=channel_name_map.get(v.channel_id, "Unknown"),
-            channel_id=v.channel_id,
-            published_at=v.published_at.isoformat() if v.published_at else None,
-            view_count=v.view_count,
-            duration=v.duration
-        ))
-        
+    seen = set()
+    for res in results:
+        if not isinstance(res, list):
+            continue
+        for v in res:
+            vid = v.get('id')
+            pub = v.get('published_at')
+            if not vid or vid in seen:
+                continue
+            if not pub or pub < cutoff:  # recent only
+                continue
+            seen.add(vid)
+            feed_items.append({
+                "id": vid,
+                "title": v.get('title') or '',
+                "thumbnail": v.get('thumbnail') or f"https://i.ytimg.com/vi/{vid}/mqdefault.jpg",
+                "author": v.get('author') or name_map.get(v.get('channel_id'), "Unknown"),
+                "channel_id": v.get('channel_id') or '',
+                "published_at": pub,
+                "view_count": v.get('view_count'),
+                "duration": v.get('duration'),
+            })
+
+    feed_items.sort(key=lambda x: x.get('published_at') or '', reverse=True)
+
+    # Cache for 10 minutes (also bounds how often the navbar badge triggers fetches)
+    await cache_service.set(cache_key, feed_items, ttl=600)
+
     return feed_items
