@@ -1115,45 +1115,50 @@ function VideoPlayer({
                 className="player-controls"
                 onClick={(e) => e.stopPropagation()}
             >
-                {/* Previous track */}
-                {onPrev && (
-                    <button
-                        className="control-button"
-                        onClick={(e) => { e.stopPropagation(); onPrev() }}
-                        title="上一首"
-                    >
-                        <svg viewBox="0 0 24 24" fill="currentColor" width="24" height="24">
-                            <path d="M6 6h2v12H6zm3.5 6l8.5 6V6z" />
-                        </svg>
-                    </button>
-                )}
+                {/* Prev / Play / Next — only in video mode. In音樂模式 use the big
+                    side arrows + center play button, and keep the control bar minimal
+                    (timeline + time + loop) so the timeline isn't squeezed away. */}
+                {!useAudioOnly && (
+                    <>
+                        {onPrev && (
+                            <button
+                                className="control-button"
+                                onClick={(e) => { e.stopPropagation(); onPrev() }}
+                                title="上一首"
+                            >
+                                <svg viewBox="0 0 24 24" fill="currentColor" width="24" height="24">
+                                    <path d="M6 6h2v12H6zm3.5 6l8.5 6V6z" />
+                                </svg>
+                            </button>
+                        )}
 
-                <button
-                    className="control-button"
-                    onClick={(e) => { e.stopPropagation(); isPlaying ? handlePause() : handlePlay() }}
-                >
-                    {isPlaying ? (
-                        <svg viewBox="0 0 24 24" fill="currentColor" width="24" height="24">
-                            <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" />
-                        </svg>
-                    ) : (
-                        <svg viewBox="0 0 24 24" fill="currentColor" width="24" height="24">
-                            <path d="M8 5v14l11-7z" />
-                        </svg>
-                    )}
-                </button>
+                        <button
+                            className="control-button"
+                            onClick={(e) => { e.stopPropagation(); isPlaying ? handlePause() : handlePlay() }}
+                        >
+                            {isPlaying ? (
+                                <svg viewBox="0 0 24 24" fill="currentColor" width="24" height="24">
+                                    <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" />
+                                </svg>
+                            ) : (
+                                <svg viewBox="0 0 24 24" fill="currentColor" width="24" height="24">
+                                    <path d="M8 5v14l11-7z" />
+                                </svg>
+                            )}
+                        </button>
 
-                {/* Next track */}
-                {onNext && (
-                    <button
-                        className="control-button"
-                        onClick={(e) => { e.stopPropagation(); onNext() }}
-                        title="下一首"
-                    >
-                        <svg viewBox="0 0 24 24" fill="currentColor" width="24" height="24">
-                            <path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z" />
-                        </svg>
-                    </button>
+                        {onNext && (
+                            <button
+                                className="control-button"
+                                onClick={(e) => { e.stopPropagation(); onNext() }}
+                                title="下一首"
+                            >
+                                <svg viewBox="0 0 24 24" fill="currentColor" width="24" height="24">
+                                    <path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z" />
+                                </svg>
+                            </button>
+                        )}
+                    </>
                 )}
 
                 {/* Single-track loop toggle */}
@@ -1196,6 +1201,9 @@ function VideoPlayer({
                     {formatTime(currentTime)} / {formatTime(duration)}
                 </span>
 
+                {/* Settings / Switch / Fullscreen — hidden in 音樂模式 to keep the bar minimal (timeline + time + loop only) */}
+                {!useAudioOnly && (
+                  <>
                 {/* Settings Button */}
                 <button
                     className="control-button"
@@ -1257,6 +1265,8 @@ function VideoPlayer({
                         </svg>
                     )}
                 </button>
+                  </>
+                )}
             </div>
 
             {/* Settings Overlay */}
