@@ -1170,8 +1170,9 @@ function VideoPlayer({
                     title={loopMode ? '關閉單曲循環' : '開啟單曲循環'}
                     style={{ color: loopMode ? '#ff0000' : 'white' }}
                 >
+                    {/* repeat-one icon: repeat arrows with a "1" = single-track loop */}
                     <svg viewBox="0 0 24 24" fill="currentColor" width="22" height="22">
-                        <path d="M7 7h10v3l4-4-4-4v3H5v6h2V7zm10 10H7v-3l-4 4 4 4v-3h12v-6h-2v4z" />
+                        <path d="M7 7h10v3l4-4-4-4v3H5v6h2V7zm10 10H7v-3l-4 4 4 4v-3h12v-6h-2v4zM13 15V9h-1l-2 1v1h1.5v4H13z" />
                     </svg>
                 </button>
 
