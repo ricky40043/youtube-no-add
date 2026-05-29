@@ -9,6 +9,7 @@ from database.connection import get_db
 from database.models import Subscription, User
 from routers.user import get_current_user
 from services.ytdlp_service import ytdlp_service
+from services.cache_service import cache_service
 
 router = APIRouter()
 
@@ -17,7 +18,7 @@ class SubscriptionCreate(BaseModel):
     channel_id: str
     channel_name: str
     channel_thumbnail: Optional[str] = None
-    notify_enabled: bool = False
+    notify_enabled: bool = True  # 訂閱即預設開啟鈴鐺，讓「最新通知」分頁也有資料
 
 class SubscriptionResponse(BaseModel):
     id: int
@@ -98,10 +99,13 @@ async def subscribe_channel(
     db.add(new_sub)
     await db.commit()
     await db.refresh(new_sub)
-    
+
+    # Invalidate cached subscription feed so the new channel shows up immediately
+    await cache_service.delete(f"subs_feed:{current_user.id}")
+
     # Trigger background sync for this channel immediately
     background_tasks.add_task(sync_new_channel, sub_data.channel_id)
-    
+
     return new_sub
 
 async def sync_new_channel(channel_id: str):
@@ -133,6 +137,7 @@ async def unsubscribe_channel(
         )
     )
     await db.commit()
+    await cache_service.delete(f"subs_feed:{current_user.id}")
     return {"message": "Unsubscribed"}
 
 @router.get("/feed", response_model=List[VideoFeedItem])
@@ -142,49 +147,53 @@ async def get_subscription_feed(
 ):
     """
     Get aggregated feed of latest videos from subscribed channels.
-    Note: For now this real-time fetches. For production, this should be cached background job.
-    We limits to top 10 most recent subscriptions to avoid timeout.
+    Real-time fetches each channel's latest uploads (not gated by notify_enabled
+    or a 7-day window) and caches the result per user. This is the "訂閱內容" feed.
     """
+    # Serve from cache if available (per-user, short TTL for freshness)
+    cache_key = f"subs_feed:{current_user.id}"
+    cached = await cache_service.get(cache_key)
+    if cached is not None:
+        return cached
+
     # Get user subscriptions
-    # We might want to sort by something, but for now just all
     subs_result = await db.execute(
         select(Subscription).filter(Subscription.user_id == current_user.id)
     )
     subs = subs_result.scalars().all()
-    
+
     if not subs:
         return []
 
-    # Limit to 10 channels for performance
-    target_subs = subs[:10] 
-    
+    # Cap channels fetched per request to bound latency
+    target_subs = subs[:30]
+
     all_videos = []
-    
-    # Fetch in parallel?
-    # ytdlp_service needs an async method for retrieval
-    # We will implement get_channel_latest_videos in ytdlp_service
-    
+
     import asyncio
-    
-    tasks = [ytdlp_service.get_channel_latest_videos(sub.channel_id) for sub in target_subs]
+
+    tasks = [ytdlp_service.get_channel_latest_videos(sub.channel_id, limit=5) for sub in target_subs]
     results = await asyncio.gather(*tasks, return_exceptions=True)
-    
+
     for res in results:
         if isinstance(res, list):
             all_videos.extend(res)
-            
+
     # Remove duplicates if any
     seen = set()
     unique_videos = []
     for v in all_videos:
-        if v['id'] not in seen:
+        if v.get('id') and v['id'] not in seen:
             seen.add(v['id'])
             unique_videos.append(v)
-            
-    # Sort by published_at descending (newest first)
-    # published_at from yt-dlp is usually YYYYMMDD string
-    unique_videos.sort(key=lambda x: x.get('published_at') or '00000000', reverse=True)
-    
+
+    # Sort by published_at descending (newest first).
+    # _format_date returns 'YYYY-MM-DD'; missing dates sort last.
+    unique_videos.sort(key=lambda x: x.get('published_at') or '', reverse=True)
+
+    # Cache for 10 minutes; new subscriptions clear this key (see subscribe/unsubscribe)
+    await cache_service.set(cache_key, unique_videos, ttl=600)
+
     return unique_videos
 
 @router.put("/{channel_id}/notify")

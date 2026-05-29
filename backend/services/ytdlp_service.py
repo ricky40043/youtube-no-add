@@ -302,14 +302,16 @@ class YtDlpService:
             print(f"yt-dlp audio stream error: {e}")
             return None
     
-    async def search(self, query: str, max_results: int = 20, offset: int = 0) -> List[Dict[str, Any]]:
+    async def search(self, query: str, max_results: int = 20, offset: int = 0, sort: str = 'relevance') -> List[Dict[str, Any]]:
         """
         Search YouTube videos with parallel metadata fetching
-        
+
         Args:
             query: Search query
             max_results: Number of results to return (limit)
             offset: Number of results to skip (0-based)
+            sort: Result ordering — 'relevance' (default, keep YouTube's native
+                  order), 'views' (view_count desc), or 'date' (newest first)
         """
         # Calculate playlist range (1-based)
         start = offset + 1
@@ -360,9 +362,15 @@ class YtDlpService:
                             'published_at': entry.get('upload_date'),
                         })
                 
-                # Sort by view_count desc for popularity
-                results.sort(key=lambda x: x.get('view_count') or 0, reverse=True)
-                
+                # Ordering: yt-dlp already returns YouTube's relevance order.
+                # Re-sorting by view_count (the old default) destroyed relevance,
+                # so only re-sort when the caller explicitly asks.
+                if sort == 'views':
+                    results.sort(key=lambda x: x.get('view_count') or 0, reverse=True)
+                elif sort == 'date':
+                    results.sort(key=lambda x: x.get('published_at') or '', reverse=True)
+                # sort == 'relevance' (default): keep native order
+
                 return results
         except Exception as e:
             print(f"yt-dlp search error: {e}")

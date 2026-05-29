@@ -165,28 +165,31 @@ class SyncService:
                 existing = await db.execute(select(Video).where(Video.id == v['id']))
                 existing_video = existing.scalars().first()
                 
-                # Logic to parse date (reused for both existing and new)
-                try:
-                    p_date = v.get('published_at') or v.get('release_date')
-                    if p_date and isinstance(p_date, str) and len(p_date) == 8:
-                        pub_at = datetime.strptime(p_date, "%Y%m%d")
-                    else:
-                         # Use existing if available, else epoch
-                        if existing_video:
-                             pub_at = existing_video.published_at
-                        else:
-                             pub_at = datetime(1970, 1, 1)
-                except:
-                     pub_at = existing_video.published_at if existing_video else datetime(1970, 1, 1)
+                # Parse published date. get_channel_latest_videos returns
+                # 'YYYY-MM-DD' (via _format_date); older callers may send 'YYYYMMDD'.
+                parsed_date = None
+                p_date = v.get('published_at') or v.get('release_date')
+                if p_date and isinstance(p_date, str):
+                    s = p_date.strip()
+                    try:
+                        if len(s) == 8 and s.isdigit():
+                            parsed_date = datetime.strptime(s, "%Y%m%d")
+                        elif len(s) >= 10:
+                            parsed_date = datetime.strptime(s[:10], "%Y-%m-%d")
+                    except ValueError:
+                        parsed_date = None
 
                 if existing_video:
-                    # Update published_at if we successfully parsed a new date
-                    if pub_at != datetime(1970, 1, 1):
-                        existing_video.published_at = pub_at
+                    # Backfill the date only when we actually parsed a real one
+                    if parsed_date:
+                        existing_video.published_at = parsed_date
                         db.add(existing_video)
                     continue
 
-                # Create new video if not exists
+                # New video: use the parsed date, else default to "now" so a
+                # freshly synced upload isn't wrongly dropped by the 7-day
+                # notifications window (previously defaulted to 1970 -> always filtered out).
+                pub_at = parsed_date or datetime.utcnow()
                 new_video = Video(
                     id=v['id'],
                     channel_id=channel_id,

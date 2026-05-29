@@ -53,9 +53,21 @@ async def get_feed(
     Uses watch history from database to find relevant videos via yt-dlp search.
     """
     import time
-    start_time = time.time()
-    print(f"[FEED] Request started, cursor={cursor}, limit={limit}, user={current_user.id if current_user else 'anonymous'}")
+    from services.cache_service import cache_service
     
+    start_time = time.time()
+    user_id = current_user.id if current_user else 'anonymous'
+    print(f"[FEED] Request started, cursor={cursor}, limit={limit}, user={user_id}")
+    
+    # Check cache first (only for first page, anonymous users, or users without history)
+    cache_key = f"feed:{user_id}:{cursor or '0'}:{limit}"
+    if not current_user or not cursor:
+        cached = await cache_service.get(cache_key)
+        if cached:
+            print(f"[FEED] Cache hit for {cache_key}")
+            return cached
+    
+    # Only compute if not cached
     from services.ytdlp_service import ytdlp_service
     
     # Parse cursor
@@ -123,6 +135,12 @@ async def get_feed(
             unique_queries.append(q)
     
     search_queries = unique_queries[:6 + page * 2]  # page 0: 6, page 1: 8, page 2: 10...
+
+    # Cold-start: no personalization signal (new user / empty history / anonymous).
+    # Use a few generic seed topics so we still surface varied content.
+    if not search_queries:
+        search_queries = ["音樂 排行榜", "熱門 遊戲", "新聞 時事"]
+        print(f"[FEED] No personalization signal, using seed queries: {search_queries}")
     print(f"[FEED] Using search queries: {search_queries}")
     
     # Search for videos based on interests
@@ -144,7 +162,23 @@ async def get_feed(
         
         if len(all_videos) >= limit * 10:
             break
-    
+
+    # Cold-start / low-result fallback: blend in trending so the feed is never
+    # blank (fixes empty "為您推薦" for new users). Invidious trending is a single
+    # fast call and complements the yt-dlp search results.
+    if len(all_videos) < limit * 2:
+        try:
+            from services.invidious_service import invidious_service
+            trending = await invidious_service.get_trending('TW')
+            for r in trending:
+                vid = r.get('id') or r.get('video_id')
+                if vid and vid not in seen_ids:
+                    seen_ids.add(vid)
+                    all_videos.append(r)
+            print(f"[FEED] Added trending fallback, total now {len(all_videos)}")
+        except Exception as te:
+            print(f"[FEED] Trending fallback failed: {te}")
+
     # Shuffle for variety and apply pagination
     random.seed(page * 12345)
     random.shuffle(all_videos)
@@ -160,10 +194,22 @@ async def get_feed(
     total_time = time.time() - start_time
     print(f"[FEED] Returning {len(paged_items)} items, page={page}, has_next={has_next}, time={total_time:.2f}s")
     
-    return {
+    response_data = {
         "items": paged_items,
         "next_cursor": next_cursor
     }
+    
+    # Cache the response — but never cache an empty page, otherwise a transient
+    # blank result gets locked in for minutes even after the user gains
+    # history/subscriptions.
+    if paged_items:
+        cache_ttl = 600 if current_user else 300
+        await cache_service.set(cache_key, response_data, ttl=cache_ttl)
+        print(f"[FEED] Cached for {cache_ttl}s")
+    else:
+        print("[FEED] Empty page, skipping cache")
+
+    return response_data
 
 @router.post("/sync")
 async def trigger_sync(
@@ -175,6 +221,97 @@ async def trigger_sync(
     """
     background_tasks.add_task(run_sync_task, current_user.id)
     return {"status": "Background sync started"}
+
+@router.post("/precompute")
+async def precompute_feed(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Pre-compute recommendations for a user and store in cache.
+    This can be called periodically to speed up feed requests.
+    """
+    from services.cache_service import cache_service
+    from services.ytdlp_service import ytdlp_service
+    import random
+    
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Login required")
+    
+    print(f"[FEED] Pre-computing feed for user {current_user.id}")
+    
+    # Get watch history
+    try:
+        from database.models import WatchHistory
+        stmt = select(WatchHistory).where(
+            WatchHistory.user_id == current_user.id
+        ).order_by(WatchHistory.watched_at.desc()).limit(20)
+        result = await db.execute(stmt)
+        history_items = result.scalars().all()
+        
+        watch_history_titles = [wh.video_title for wh in history_items if wh.video_title]
+    except Exception as e:
+        print(f"[FEED] Failed to get watch history: {e}")
+        watch_history_titles = []
+    
+    # Extract keywords
+    search_queries = []
+    for title in watch_history_titles[:10]:
+        title = title.strip()
+        if title:
+            words = title.split()[:3]
+            if words:
+                search_queries.append(' '.join(words))
+    
+    # Add interest tags
+    try:
+        user_profile_text = await recommendation_service.get_user_profile_text(db, current_user.id, None)
+        if user_profile_text:
+            for part in user_profile_text.split(',')[:3]:
+                if ':' in part:
+                    tag = part.split(':')[0].strip()
+                    if tag:
+                        search_queries.append(tag)
+    except:
+        pass
+    
+    # Deduplicate
+    seen = set()
+    unique_queries = []
+    for q in search_queries:
+        q_lower = q.lower()
+        if q_lower not in seen and len(q) > 2:
+            seen.add(q_lower)
+            unique_queries.append(q)
+    
+    search_queries = unique_queries[:6]
+    
+    # Search and collect videos
+    all_videos = []
+    seen_ids = set()
+    
+    for query in search_queries[:3]:  # Limit to 3 queries for speed
+        try:
+            results = await ytdlp_service.search(query, max_results=15)
+            for r in results:
+                vid = r.get('id')
+                if vid and vid not in seen_ids:
+                    seen_ids.add(vid)
+                    all_videos.append(r)
+        except Exception as e:
+            print(f"[FEED] Search failed for '{query}': {e}")
+    
+    # Shuffle and take 50
+    random.shuffle(all_videos)
+    precomputed = all_videos[:50]
+    
+    # Store in cache
+    cache_key = f"feed:precomputed:{current_user.id}"
+    await cache_service.set(cache_key, precomputed, ttl=3600)  # 1 hour
+    
+    print(f"[FEED] Pre-computed {len(precomputed)} videos for user {current_user.id}")
+    
+    return {"status": "Pre-computed", "count": len(precomputed)}
 
 @router.post("/refresh-profile")
 async def refresh_profile(

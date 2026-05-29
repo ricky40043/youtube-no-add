@@ -8,7 +8,24 @@
 export function formatTimeAgo(dateInput) {
     if (!dateInput) return '';
 
-    const date = new Date(dateInput);
+    let date;
+    
+    // Handle Unix timestamp (seconds or milliseconds)
+    if (typeof dateInput === 'number') {
+        // If less than 1e11, it's seconds; otherwise milliseconds
+        const timestamp = dateInput < 1e11 ? dateInput * 1000 : dateInput;
+        date = new Date(timestamp);
+    }
+    // Handle yt-dlp format: YYYYMMDD (e.g., "20240115")
+    else if (typeof dateInput === 'string' && /^\d{8}$/.test(dateInput)) {
+        const year = parseInt(dateInput.substring(0, 4));
+        const month = parseInt(dateInput.substring(4, 6)) - 1;
+        const day = parseInt(dateInput.substring(6, 8));
+        date = new Date(year, month, day);
+    } else {
+        date = new Date(dateInput);
+    }
+    
     if (isNaN(date.getTime())) return '';
 
     const now = new Date();

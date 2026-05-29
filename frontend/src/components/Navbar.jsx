@@ -240,9 +240,7 @@ function Navbar() {
                         </button>
                         <button className="nav-link-btn" onClick={() => navigate('/playlists')} title="我的播放清單">
                             <span className="icon">
-                                <svg viewBox="0 0 24 24" fill="currentColor" style={{ width: '24px', height: '24px' }}>
-                                    <path d="M20 6h-16c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2v-12c0-1.1-.9-2-2-2zm0 14h-16v-12h16v12zm-2-16h-12v2h12v-2zm-4-4h-8v2h8v-2z" />
-                                </svg>
+                                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"><g fill="none"><path d="M3 9h18l-1.8 12H4.8z"/><path d="m13.5 15l-2 1.5v-3z"/><path stroke="currentColor" strokeLinecap="square" strokeWidth="2" d="M5 6h14M7 3h10M3 9h18l-1.8 12H4.8z"/><path stroke="currentColor" strokeWidth="2" d="m13.5 15l-2 1.5v-3z"/></g></svg>
                             </span>
                             <span className="label">播放清單</span>
                         </button>

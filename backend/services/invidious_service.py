@@ -101,6 +101,7 @@ class InvidiousService:
                                 f"https://i.ytimg.com/vi/{item.get('videoId')}/hqdefault.jpg"),
                             "duration": item.get("lengthSeconds"),
                             "view_count": item.get("viewCount"),
+                            "published_at": item.get("published"),
                         })
                 
                 return results
@@ -126,6 +127,7 @@ class InvidiousService:
                     "thumbnail": item.get("videoThumbnails", [{}])[0].get("url"),
                     "duration": item.get("lengthSeconds"),
                     "view_count": item.get("viewCount"),
+                    "published_at": item.get("published"),
                 } for item in data[:20]]
         except Exception as e:
             print(f"Invidious trending error: {e}")

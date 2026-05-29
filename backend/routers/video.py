@@ -340,8 +340,16 @@ async def get_related_videos(video_id: str, offset: int = 0, limit: int = 20):
     if not title:
         raise HTTPException(status_code=404, detail="Video title not found")
     
+    # --- Helpers for relevance scoring ---
+    def _tokenize(text):
+        cleaned = re.sub(r'[\[\]【】\(\)『』～~「」《》#|\-_,.!?！？、。:：/]', ' ', (text or '').lower())
+        return set(w for w in cleaned.split() if len(w) > 1)
+
+    # Keyword fingerprint of the original video (title + tags) for relevance matching
+    base_keywords = _tokenize(title) | set(t.lower() for t in tags[:10] if t)
+
     # --- Build search strategies (all run in parallel) ---
-    
+
     async def strategy_channel():
         """策略1: 同頻道其他影片"""
         if not channel_id:
@@ -353,7 +361,7 @@ async def get_related_videos(video_id: str, offset: int = 0, limit: int = 20):
         except Exception as e:
             print(f"[Related] Channel strategy failed: {e}")
             return []
-    
+
     async def strategy_tags():
         """策略2: 用 Tags 搜尋相似主題"""
         if not tags:
@@ -366,19 +374,13 @@ async def get_related_videos(video_id: str, offset: int = 0, limit: int = 20):
         except Exception as e:
             print(f"[Related] Tags strategy failed: {e}")
             return []
-    
+
     async def strategy_category():
         """策略3: 分類 + 標題關鍵字"""
-        # Clean title: remove brackets, special chars
         clean = re.sub(r'[\[\]【】\(\)『』～~「」《》#|\-_]', ' ', title)
         words = [w for w in clean.split() if len(w) > 1]
         keywords = " ".join(words[:3])
-        
-        if categories:
-            query = f"{categories[0]} {keywords}"
-        else:
-            query = keywords
-        
+        query = f"{categories[0]} {keywords}" if categories else keywords
         if not query.strip():
             return []
         try:
@@ -388,7 +390,7 @@ async def get_related_videos(video_id: str, offset: int = 0, limit: int = 20):
         except Exception as e:
             print(f"[Related] Category strategy failed: {e}")
             return []
-    
+
     async def strategy_author():
         """策略4: 搜尋同作者/YouTuber"""
         if not author:
@@ -400,7 +402,7 @@ async def get_related_videos(video_id: str, offset: int = 0, limit: int = 20):
         except Exception as e:
             print(f"[Related] Author strategy failed: {e}")
             return []
-    
+
     async def strategy_clean_title():
         """策略5: 清洗標題後搜尋"""
         clean = re.sub(r'[\[\]【】\(\)『』～~「」《》#|\-_]', ' ', title)
@@ -415,98 +417,95 @@ async def get_related_videos(video_id: str, offset: int = 0, limit: int = 20):
         except Exception as e:
             print(f"[Related] Clean title strategy failed: {e}")
             return []
-        try:
-            results = await ytdlp_service.search(author, max_results=6)
-            print(f"[Related] Author strategy: {len(results)} results (author: {author})")
-            return results
-        except Exception as e:
-            print(f"[Related] Author strategy failed: {e}")
-            return []
-    
-    async def strategy_clean_title():
-        """策略5: 清洗標題後搜尋"""
-        clean = re.sub(r'[\[\]【】\(\)『』～~「」《》#|\-_]', ' ', title)
-        words = [w for w in clean.split() if len(w) > 1]
-        if len(words) <= 1:
-            return []
-        query = " ".join(words[:5])
-        try:
-            results = await ytdlp_service.search(query, max_results=8)
-            print(f"[Related] Clean title strategy: {len(results)} results (query: {query[:50]})")
-            return results
-        except Exception as e:
-            print(f"[Related] Clean title strategy failed: {e}")
-            return []
-    
-    # 2. Run fewer strategies for performance (only 3 instead of 5)
-    # Use tags + clean_title + author (skip channel to avoid duplicates)
+
+    # 2. Run ALL five strategies in parallel for diverse sources
+    strategy_names = ["channel", "tags", "category", "clean_title", "author"]
     results = await asyncio.gather(
+        strategy_channel(),
         strategy_tags(),
+        strategy_category(),
         strategy_clean_title(),
         strategy_author(),
         return_exceptions=True
     )
-    
-    # 3. Merge results with weighted mixing (simplified)
+
+    # Small per-strategy bonus so each source contributes, but relevance dominates
+    strategy_bonus = {
+        "channel": 0.15, "tags": 0.20, "category": 0.15,
+        "clean_title": 0.20, "author": 0.10,
+    }
+
+    import random
+    # 3. Merge with relevance-first scoring + a cap on same-channel videos
     seen_ids = {video_id}  # exclude current video
     merged = []
-    
-    # Simpler weights: tags 50%, clean_title 30%, author 20%
-    strategy_weights = {
-        "tags": 0.50,
-        "clean_title": 0.30,
-        "author": 0.20
-    }
-    strategy_names = ["tags", "clean_title", "author"]
-    # Higher limits since we're running fewer queries
-    strategy_limits = {
-        "tags": 15,
-        "clean_title": 10,
-        "author": 10
-    }
-    
-    # Count per strategy for limiting
-    strategy_counts = {name: 0 for name in strategy_names}
-    
+    SAME_CHANNEL_MAX = 4  # avoid "整排同一人" domination
+    same_channel_count = 0
+
     for idx, batch in enumerate(results):
         if isinstance(batch, Exception):
             print(f"[Related] Strategy {strategy_names[idx]} raised: {batch}")
             continue
         if not isinstance(batch, list):
             continue
-        
+
         strategy_name = strategy_names[idx]
-        weight = strategy_weights.get(strategy_name, 0)
-        limit = strategy_limits.get(strategy_name, 10)
-        
+        bonus = strategy_bonus.get(strategy_name, 0.1)
+
         for video in batch:
             vid = video.get('id')
-            if vid and vid not in seen_ids and strategy_counts[strategy_name] < limit:
-                seen_ids.add(vid)
-                strategy_counts[strategy_name] += 1
-                
-                # Calculate score based on weight and view_count
-                view_count = video.get('view_count') or 0
-                view_score = min(view_count / 1000000, 10)  # Normalize to 0-10
-                score = weight * (view_score + 1)  # +1 to ensure non-zero
-                
-                video['_source'] = strategy_name
-                video['_score'] = score
-                merged.append(video)
-    
-    # 4. Add random jitter and sort by score
-    import random
-    for v in merged:
-        jitter = random.uniform(-0.05, 0.05)
-        v['_score'] = (v.get('_score', 0) + jitter)
-    
+            if not vid or vid in seen_ids:
+                continue
+
+            # Cap videos from the original channel / same author
+            is_same_channel = (
+                (video.get('channel_id') and video.get('channel_id') == channel_id)
+                or (author and video.get('author') == author)
+            )
+            if is_same_channel and same_channel_count >= SAME_CHANNEL_MAX:
+                continue
+
+            # Relevance = keyword overlap with the original video (0..1)
+            cand_tokens = _tokenize(video.get('title'))
+            overlap = len(cand_tokens & base_keywords)
+            relevance = overlap / max(len(base_keywords), 1) if base_keywords else 0
+
+            # view_count is only a minor tie-breaker, not the dominant factor
+            view_count = video.get('view_count') or 0
+            view_bonus = min(view_count / 1_000_000, 1.0) * 0.2
+
+            score = relevance + bonus + view_bonus + random.uniform(-0.03, 0.03)
+
+            seen_ids.add(vid)
+            if is_same_channel:
+                same_channel_count += 1
+            video['_score'] = score
+            merged.append(video)
+
     merged.sort(key=lambda v: -v.get('_score', 0))
-    
+
+    # 4. Pad to a minimum count with trending so the sidebar is never sparse
+    MIN_RESULTS = 12
+    if len(merged) < MIN_RESULTS:
+        try:
+            from services.invidious_service import invidious_service
+            trending = await invidious_service.get_trending('TW')
+            for v in trending:
+                vid = v.get('id')
+                if vid and vid not in seen_ids:
+                    seen_ids.add(vid)
+                    v['_score'] = -1  # keep below genuinely related results
+                    merged.append(v)
+                    if len(merged) >= MIN_RESULTS:
+                        break
+        except Exception as e:
+            print(f"[Related] Trending padding failed: {e}")
+
     # Remove internal fields before returning
     for v in merged:
         v.pop('_source', None)
         v.pop('_score', None)
-    
+
     # Cache full results for pagination
     full_results = merged
     print(f"[Related] Full: {len(full_results)} related videos for {video_id}")
