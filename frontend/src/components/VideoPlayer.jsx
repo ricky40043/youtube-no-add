@@ -35,6 +35,11 @@ function VideoPlayer({
     const [backgroundMode, setBackgroundMode] = useState(() => localStorage.getItem('backgroundMode') === 'true')
     const [autoAudioOnly, setAutoAudioOnly] = useState(false) // Auto-detected audio mode (no video stream)
 
+    // Single-track loop (repeat current track) — persisted
+    const [loopMode, setLoopMode] = useState(() => localStorage.getItem('loopMode') === 'true')
+    const loopRef = useRef(loopMode)
+    useEffect(() => { loopRef.current = loopMode }, [loopMode])
+
     // Combine manual preference and auto-detection
     const useAudioOnly = backgroundMode || autoAudioOnly || !!externalAudioRef
 
@@ -247,6 +252,8 @@ function VideoPlayer({
         onPause: handlePause,
         onSeekBackward: handleSeekBackward,
         onSeekForward: handleSeekForward,
+        onNext: onNext,       // lock-screen / headphone next track
+        onPrevious: onPrev,   // lock-screen / headphone previous track
     })
 
     // Initialize video/audio player
@@ -467,6 +474,16 @@ function VideoPlayer({
     const handlePauseEvent = () => setIsPlaying(false)
     const handleEndedEvent = () => {
         console.log('[VideoPlayer] Video ended event fired.')
+
+        // Single-track loop: replay the current track and DON'T advance
+        if (loopRef.current) {
+            const media = useAudioOnly ? audioRef.current : videoRef.current
+            if (media) {
+                media.currentTime = 0
+                media.play().catch(e => { if (e.name !== 'NotAllowedError') console.error(e) })
+            }
+            return
+        }
 
         // Mobile Autoplay Fix: Use silence spacer to keep audio session alive
         if (useAudioOnly && audioRef.current) {
@@ -808,6 +825,29 @@ function VideoPlayer({
         }
     }
 
+    // Audio (music) mode double-tap seek: left 1/3 = -5s, right 1/3 = +5s, center = play/pause
+    const handleAudioTouchEnd = (e) => {
+        const now = Date.now()
+        if (now - lastTapTime.current < 300) {
+            e.preventDefault() // block ghost click / zoom
+            const width = e.currentTarget.offsetWidth
+            const x = e.changedTouches[0].clientX - e.currentTarget.getBoundingClientRect().left
+            if (x < width * 0.35) {
+                handleSeekBackward(5)
+                setFeedback({ show: true, text: '5秒', icon: '⏪' })
+            } else if (x > width * 0.65) {
+                handleSeekForward(5)
+                setFeedback({ show: true, text: '5秒', icon: '⏩' })
+            } else {
+                handleVideoClick()
+            }
+            setTimeout(() => setFeedback({ show: false, text: '', icon: null }), 600)
+            lastTapTime.current = 0
+        } else {
+            lastTapTime.current = now
+        }
+    }
+
     // Keyboard Shortcuts
     useEffect(() => {
         const handleKeyDown = (e) => {
@@ -838,7 +878,7 @@ function VideoPlayer({
         <div className="player-container">
             {useAudioOnly ? (
                 // Audio-only player (for background playback)
-                <div className="audio-player" onClick={handleVideoClick}>
+                <div className="audio-player" onClick={handleVideoClick} onTouchEnd={handleAudioTouchEnd}>
                     <div className="audio-cover">
                         <img src={videoInfo?.thumbnail} alt={videoInfo?.title} />
                         <div className="audio-overlay">
@@ -849,6 +889,13 @@ function VideoPlayer({
                                 {isPlaying ? '⏸' : '▶'}
                             </button>
                         </div>
+                        {/* Double-tap seek feedback */}
+                        {feedback.show && (
+                            <div className="gesture-feedback">
+                                <div className="feedback-icon">{feedback.icon}</div>
+                                <div className="feedback-text">{feedback.text}</div>
+                            </div>
+                        )}
                     </div>
                     <audio
                         ref={audioRef}
@@ -1044,6 +1091,19 @@ function VideoPlayer({
                 className="player-controls"
                 onClick={(e) => e.stopPropagation()}
             >
+                {/* Previous track */}
+                {onPrev && (
+                    <button
+                        className="control-button"
+                        onClick={(e) => { e.stopPropagation(); onPrev() }}
+                        title="上一首"
+                    >
+                        <svg viewBox="0 0 24 24" fill="currentColor" width="24" height="24">
+                            <path d="M6 6h2v12H6zm3.5 6l8.5 6V6z" />
+                        </svg>
+                    </button>
+                )}
+
                 <button
                     className="control-button"
                     onClick={(e) => { e.stopPropagation(); isPlaying ? handlePause() : handlePlay() }}
@@ -1057,6 +1117,38 @@ function VideoPlayer({
                             <path d="M8 5v14l11-7z" />
                         </svg>
                     )}
+                </button>
+
+                {/* Next track */}
+                {onNext && (
+                    <button
+                        className="control-button"
+                        onClick={(e) => { e.stopPropagation(); onNext() }}
+                        title="下一首"
+                    >
+                        <svg viewBox="0 0 24 24" fill="currentColor" width="24" height="24">
+                            <path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z" />
+                        </svg>
+                    </button>
+                )}
+
+                {/* Single-track loop toggle */}
+                <button
+                    className="control-button"
+                    onClick={(e) => {
+                        e.stopPropagation()
+                        const next = !loopMode
+                        setLoopMode(next)
+                        localStorage.setItem('loopMode', String(next))
+                        setFeedback({ show: true, text: next ? '單曲循環開' : '單曲循環關', icon: '🔁' })
+                        setTimeout(() => setFeedback({ show: false, text: '', icon: null }), 800)
+                    }}
+                    title={loopMode ? '關閉單曲循環' : '開啟單曲循環'}
+                    style={{ color: loopMode ? '#ff0000' : 'white' }}
+                >
+                    <svg viewBox="0 0 24 24" fill="currentColor" width="22" height="22">
+                        <path d="M7 7h10v3l4-4-4-4v3H5v6h2V7zm10 10H7v-3l-4 4 4 4v-3h12v-6h-2v4z" />
+                    </svg>
                 </button>
 
                 <div
@@ -1358,6 +1450,9 @@ function VideoPlayer({
           align-items: center;
           cursor: pointer;
           position: relative;
+          /* Let the bar own the touch gesture so dragging scrubs instead of
+             scrolling the page (fixes "hard to drag" in music mode) */
+          touch-action: none;
         }
         
         .progress-bar {
@@ -1429,20 +1524,22 @@ function VideoPlayer({
           
           /* Larger touch targets for mobile */
           .progress-container {
-            height: 30px;
+            height: 36px;
           }
-          
+
           .progress-bar {
-            height: 4px;
+            height: 6px;
           }
-          
-          .progress-hit-area {
-            top: -15px;
-            bottom: -15px;
+
+          .progress-handle {
+            width: 16px;
+            height: 16px;
+            right: -8px;
           }
+
           .progress-hit-area {
-            top: -15px;
-            bottom: -15px;
+            top: -16px;
+            bottom: -16px;
           }
         }
         
