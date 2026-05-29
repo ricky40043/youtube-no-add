@@ -38,6 +38,12 @@ function Watch() {
     // Feature: Hide background playback buttons on desktop
     const isMobile = useIsMobile(1024)
 
+    // Feature: Video history stack for "Go Back" functionality
+    const [videoHistory, setVideoHistory] = useState(() => {
+        const saved = localStorage.getItem('videoHistory')
+        return saved ? JSON.parse(saved) : []
+    })
+
     const onPlayerReady = (event) => {
         youtubePlayerRef.current = event.target
     }
@@ -52,6 +58,10 @@ function Watch() {
         if (e.data === 1 || e.data === 3) {
             setEmbedError(false)
         }
+        // If video ended (0), auto-play related videos
+        if (e.data === 0) {
+            console.log('[Watch] YouTube video ended, triggering auto-play')
+        }
     }
 
     const embedOpts = {
@@ -61,6 +71,8 @@ function Watch() {
             autoplay: 1,
             modestbranding: 1,
             rel: 0,
+            enablejsapi: 1,
+            origin: window.location.origin,
             start: Math.floor(savedTime),
         },
     }
@@ -148,6 +160,9 @@ function Watch() {
                     } else if (data && Array.isArray(data.items)) {
                         items = data.items
                     }
+                    // Filter out invalid videos (check for id)
+                    items = items.filter(item => item && item.id)
+                    console.log('[Watch] Valid related videos:', items.length)
                     setRelatedVideos(items)
                     setRelatedHasMore(false) // No pagination
                 })
@@ -318,7 +333,20 @@ function Watch() {
                 // Fetch video info
                 const info = await videoApi.getInfo(videoId)
                 console.log('[Watch] Info received:', info?.title)
-                setVideoInfo(info)
+                
+                // Handle case where API returns null/undefined (e.g., 404)
+                if (!info) {
+                    console.log('[Watch] API returned null, using embed-only mode')
+                    // Still allow YouTube embed to work with minimal info
+                    setVideoInfo({
+                        id: videoId,
+                        title: '影片載入中...',
+                        thumbnail: '',
+                        author: ''
+                    })
+                } else {
+                    setVideoInfo(info)
+                }
 
                 // Feature A: Load saved progress
                 const savedProgress = localStorage.getItem(`progress_${videoId}`)
@@ -385,20 +413,47 @@ function Watch() {
                 }
             } catch (err) {
                 console.error('[Watch] Failed to fetch video:', err)
-                setError('無法載入影片，請確認連結是否正確')
+                // Only set error if NOT using embed mode (YouTube can still play even if our API fails)
+                if (!useEmbed) {
+                    setError('無法載入影片，請確認連結是否正確')
+                }
             } finally {
                 setLoading(false)
             }
         }
 
         fetchVideo()
-    }, [videoId])
+    }, [videoId, useEmbed])
 
-    // Scroll to top when video changes
+    // Scroll to top when video changes and save to history
+    const prevVideoIdRef = useRef(null)
+    
     useEffect(() => {
         console.log('[Watch] Video changed, scrolling to top')
         window.scrollTo(0, 0)
-    }, [videoId])
+        
+        // Save current video to history before switching
+        if (prevVideoIdRef.current && prevVideoIdRef.current !== videoId) {
+            setVideoHistory(prev => {
+                // Avoid duplicates - remove if already exists, then add to front
+                const filtered = prev.filter(v => v.id !== prevVideoIdRef.current)
+                const newHistory = [
+                    {
+                        id: prevVideoIdRef.current,
+                        title: videoInfo?.title || '影片',
+                        thumbnail: videoInfo?.thumbnail || ''
+                    },
+                    ...filtered
+                ].slice(0, 50) // Keep max 50 items
+                
+                localStorage.setItem('videoHistory', JSON.stringify(newHistory))
+                console.log('[Watch] Added to history, total:', newHistory.length)
+                return newHistory
+            })
+        }
+        
+        prevVideoIdRef.current = videoId
+    }, [videoId, videoInfo])
 
     // Stabilize the iframe URL to prevent unnecessary reloads during UI re-renders
     const embedSrc = useMemo(() => {
@@ -452,18 +507,50 @@ function Watch() {
             }
         }
 
-        // Priority 2: Related Videos (if no playlist)
+        // If no playlist but has related videos, play next related video (works for both embed and proxy mode)
         if (!playlistId && relatedVideos.length > 0) {
-            console.log('[Watch] Auto-playing RELATED video:', relatedVideos[0].title)
-            navigate(`/watch/${relatedVideos[0].id}`)
+            // Find next video that is NOT the current one and NOT in history
+            const historyIds = videoHistory.map(v => v.id)
+            let nextRelatedIndex = -1
+            
+            // Start from position 1 (skip first one, might be current video)
+            for (let i = 1; i < relatedVideos.length; i++) {
+                const candidate = relatedVideos[i]
+                if (candidate && candidate.id && candidate.id !== videoId && !historyIds.includes(candidate.id)) {
+                    nextRelatedIndex = i
+                    break
+                }
+            }
+            
+            // If no valid next found, try first one if it's different
+            if (nextRelatedIndex === -1) {
+                const first = relatedVideos[0]
+                if (first && first.id && first.id !== videoId) {
+                    nextRelatedIndex = 0
+                }
+            }
+            
+            if (nextRelatedIndex !== -1) {
+                const nextRelated = relatedVideos[nextRelatedIndex]
+                console.log('[Watch] Going to NEXT related video:', nextRelated.title)
+                navigate(`/watch/${nextRelated.id}`)
+                return
+            }
+        }
+
+        // If no related videos available, try to reload them
+        if (!playlistId && relatedVideos.length === 0) {
+            console.log('[Watch] No related videos, reloading...')
+            setRelatedOffset(0)
+            loadMoreRelatedVideos()
             return
         }
 
         console.log('[Watch] No next video to play.')
-        console.log('[Watch] No next video to play.')
-    }, [playlistItems, videoId, playlistId, isShuffle, shuffledIndices, relatedVideos, navigate])
+    }, [playlistItems, videoId, playlistId, isShuffle, shuffledIndices, relatedVideos, navigate, videoHistory])
 
     const goToPrevVideo = useCallback(() => {
+        // Priority 1: Playlist mode
         if (playlistItems.length > 0) {
             let prevIndex
             if (isShuffle) {
@@ -488,8 +575,25 @@ function Watch() {
                 console.log('[Watch] Going to PREV:', prevIndex)
                 navigate(`/watch/${playlistItems[prevIndex].video_id}?list=${playlistId}&index=${prevIndex}`)
             }
+            return
         }
-    }, [playlistItems, videoId, playlistId, isShuffle, shuffledIndices, navigate])
+
+        // Priority 2: Go to previous video (from history stack)
+        if (videoHistory.length > 0) {
+            const prevVideo = videoHistory[0]
+            console.log('[Watch] Going to previous video:', prevVideo.title)
+            
+            // Remove from history and save
+            const newHistory = videoHistory.slice(1)
+            setVideoHistory(newHistory)
+            localStorage.setItem('videoHistory', JSON.stringify(newHistory))
+            
+            navigate(`/watch/${prevVideo.id}`)
+            return
+        }
+
+        console.log('[Watch] No previous video available.')
+    }, [playlistItems, videoId, playlistId, isShuffle, shuffledIndices, navigate, videoHistory])
 
     // Auto-play next logic
     const handleVideoEnd = useCallback(() => {
@@ -502,7 +606,7 @@ function Watch() {
         goToNextVideo()
     }, [videoId, goToNextVideo])
 
-    // Auto-skip on error in playlist mode
+    // Auto-skip on error in playlist mode only (not related videos to avoid loops)
     useEffect(() => {
         if (error && playlistId && playlistItems.length > 0) {
             console.log('[Watch] Error detected in playlist. Auto-skipping in 2s...')
@@ -737,22 +841,22 @@ function Watch() {
                                 <button
                                     onClick={goToPrevVideo}
                                     className="control-btn-nav"
-                                    title="上一首"
-                                    disabled={!playlistId && !playlistItems.length}
-                                    style={{ opacity: (playlistId || playlistItems.length) ? 1 : 0.5, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px' }}
+                                    title="上一個影片"
+                                    disabled={!playlistId && !playlistItems.length && videoHistory.length === 0}
+                                    style={{ opacity: (playlistId || playlistItems.length || videoHistory.length > 0) ? 1 : 0.5, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px' }}
                                 >
-                                    <img src="https://api.iconify.design/famicons/play-skip-back.svg?color=white" alt="Prev" style={{ width: '16px', height: '16px' }} /> 上一首
+                                    <img src="https://api.iconify.design/famicons/play-skip-back.svg?color=white" alt="Prev" style={{ width: '16px', height: '16px' }} /> 上一個影片
                                 </button>
                                 <span style={{ color: '#aaa', fontSize: '13px' }}>
-                                    {playlistId ? `播放清單: ${playlistItems.length} 首` : '無播放清單'}
+                                    {playlistId ? `播放清單: ${playlistItems.length} 首` : videoHistory.length > 0 ? '' : '無播放清單'}
                                 </span>
                                 <button
                                     onClick={goToNextVideo}
                                     className="control-btn-nav"
-                                    title="下一首"
+                                    title="下一個影片"
                                     style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px' }}
                                 >
-                                    下一首 <img src="https://api.iconify.design/ion/play-skip-forward.svg?color=white" alt="Next" style={{ width: '16px', height: '16px' }} />
+                                    下一個影片 <img src="https://api.iconify.design/ion/play-skip-forward.svg?color=white" alt="Next" style={{ width: '16px', height: '16px' }} />
                                 </button>
                                 <style>{`
                                     .control-btn-nav {
@@ -1066,9 +1170,9 @@ function Watch() {
                                 </>
                             ) : (
                                 <>
-                                    {!loadingRelated && !relatedHasMore && (
+                                    {!loadingRelated && (
                                         <div style={{ padding: '60px 20px', textAlign: 'center', color: '#666', fontSize: '0.9rem' }}>
-                                            無法載入更多
+                                            暫無相關影片
                                         </div>
                                     )}
                                 </>

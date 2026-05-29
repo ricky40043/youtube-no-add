@@ -38,9 +38,9 @@ export const videoApi = {
 
 export const searchApi = {
     // Search videos
-    search: async (query, maxResults = 20, offset = 0) => {
+    search: async (query, maxResults = 20, offset = 0, sort = 'relevance') => {
         const response = await api.get('/api/search', {
-            params: { q: query, max_results: maxResults, offset }
+            params: { q: query, max_results: maxResults, offset, sort }
         })
         return response.data.results
     },

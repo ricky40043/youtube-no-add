@@ -162,6 +162,12 @@ function History() {
                                         <span className="date">
                                             {new Date(item.watched_at).toLocaleString()}
                                         </span>
+                                        <button 
+                                            className="inline-delete-btn"
+                                            onClick={(e) => handleDeleteItem(item.video_id, e)}
+                                        >
+                                            刪除紀錄
+                                        </button>
                                     </div>
                                 </div>
                             </div>
@@ -264,6 +270,22 @@ function History() {
                     display: flex;
                     justify-content: space-between;
                     align-items: center;
+                    gap: 8px;
+                }
+                .inline-delete-btn {
+                    background: transparent;
+                    border: none;
+                    color: var(--text-secondary);
+                    font-size: 12px;
+                    cursor: pointer;
+                    padding: 4px 8px;
+                    border-radius: 4px;
+                    transition: all 0.2s;
+                    white-space: nowrap;
+                }
+                .inline-delete-btn:hover {
+                    background: rgba(255, 59, 48, 0.15);
+                    color: #ff3b30;
                 }
                 .clear-all-btn {
                     background: rgba(220, 38, 38, 0.15);

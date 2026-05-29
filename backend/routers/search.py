@@ -11,37 +11,36 @@ router = APIRouter()
 async def search_videos(
     q: str = Query(..., description="搜尋關鍵字"),
     max_results: int = Query(20, ge=1, le=50, description="最大結果數"),
-    offset: int = Query(0, ge=0, description="跳過的結果數 (分頁用)")
+    offset: int = Query(0, ge=0, description="跳過的結果數 (分頁用)"),
+    sort: str = Query("relevance", description="排序: relevance / date / views")
 ):
     """
     搜尋 YouTube 影片
-    
+
     - **q**: 搜尋關鍵字
     - **max_results**: 返回的最大結果數 (1-50)
     - **offset**: 分頁偏移量
+    - **sort**: 排序方式 (relevance 預設 / date / views)
     """
     settings = get_settings()
-    
-    # Check cache (include offset in key)
-    cache_key = f"search:{q}:{max_results}:{offset}"
-    cached = await cache_service.get(cache_key)
-    if cached:
-        return {"results": cached}
-    
-    # Try yt-dlp first
-    results = await ytdlp_service.search(q, max_results, offset)
-    
-    # Fallback to Invidious (only if offset is 0, since simple invidious service might not support offset easily via this wrapper)
-    # Actually, let's just use yt-dlp for now or assume invidious interface needs update too.
-    # For now, if yt-dlp fails, we try invidious only for page 1.
-    if not results and offset == 0:
-        results = await invidious_service.search(q, max_results)
-    
-    # Cache results
-    if results:
-        await cache_service.set(cache_key, results, ttl=settings.search_cache_ttl)
-    
-    return {"results": results}
+
+    # Fetch a larger result set ONCE and cache it, then paginate in-memory.
+    # This avoids re-running ytsearch on every scroll (slow + duplicate/drift),
+    # and keeps pagination stable for the lifetime of the cache entry.
+    FULL_SIZE = 50
+    full_key = f"search:full:{q}:{sort}"
+    full = await cache_service.get(full_key)
+
+    if full is None:
+        full = await ytdlp_service.search(q, max_results=FULL_SIZE, offset=0, sort=sort)
+        # Fallback to Invidious if yt-dlp returned nothing
+        if not full:
+            full = await invidious_service.search(q, FULL_SIZE)
+        if full:
+            await cache_service.set(full_key, full, ttl=settings.search_cache_ttl)
+
+    page = full[offset:offset + max_results] if full else []
+    return {"results": page}
 
 
 @router.get("/trending")
@@ -53,8 +52,20 @@ async def get_trending(
     
     - **region**: 地區代碼
     """
+    from services.cache_service import cache_service
+    
+    # Check cache first (30 minutes)
+    cache_key = f"trending:{region}"
+    cached = await cache_service.get(cache_key)
+    if cached:
+        return {"results": cached}
+    
     # Try Invidious for trending (yt-dlp doesn't support trending directly)
     results = await invidious_service.get_trending(region)
+    
+    # Cache for 30 minutes
+    if results:
+        await cache_service.set(cache_key, results, ttl=1800)
     
     return {"results": results}
 
@@ -69,13 +80,23 @@ async def get_suggestions(
     - **q**: 部分關鍵字
     """
     # Search with limited results for suggestions
-    results = await ytdlp_service.search(q, max_results=5)
-    
-    # Extract unique titles as suggestions
-    suggestions = list(set([
-        r["title"][:50] for r in results if r.get("title")
-    ]))[:5]
-    
+    results = await ytdlp_service.search(q, max_results=8)
+
+    # Dedupe while preserving relevance order; keep fuller titles
+    seen = set()
+    suggestions = []
+    for r in results:
+        title = (r.get("title") or "").strip()
+        if not title:
+            continue
+        key = title.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        suggestions.append(title[:60])
+        if len(suggestions) >= 8:
+            break
+
     return {"suggestions": suggestions}
 
 
@@ -93,8 +114,8 @@ async def get_search_related(
     - **offset**: 分頁偏移
     """
     import jieba
-    import random
-    
+    import re
+
     # Extract keywords using jieba
     words = list(jieba.cut(q))
     # Filter meaningful words (length > 1)
@@ -130,8 +151,22 @@ async def get_search_related(
         if vid and vid not in seen_ids:
             seen_ids.add(vid)
             unique_results.append(video)
-    
-    # Shuffle for randomness
-    random.shuffle(unique_results)
-    
+
+    # Rank by keyword overlap with the original query (relevance-first), with
+    # view_count as a minor tie-breaker — instead of pure random.shuffle, which
+    # produced low-relevance recommendations.
+    keyword_set = set(k.lower() for k in keywords)
+
+    def _title_tokens(t):
+        cleaned = re.sub(r'[\[\]【】\(\)『』～~「」《》#|\-_]', ' ', (t or '').lower())
+        return set(w for w in cleaned.split() if len(w) > 1)
+
+    for v in unique_results:
+        overlap = len(_title_tokens(v.get('title')) & keyword_set)
+        view_count = v.get('view_count') or 0
+        v['_score'] = overlap + min(view_count / 1_000_000, 1.0) * 0.3
+    unique_results.sort(key=lambda v: -v.get('_score', 0))
+    for v in unique_results:
+        v.pop('_score', None)
+
     return {"results": unique_results[offset:offset + limit]}

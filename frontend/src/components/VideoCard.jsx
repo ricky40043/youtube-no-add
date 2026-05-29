@@ -76,11 +76,11 @@ function VideoCard({ video, type = 'vertical' }) {
                     {video.title}
                 </h3>
                 <p className="video-author" style={isHorizontal ? { fontSize: '0.8rem' } : {}}>{video.author}</p>
-                <div className="video-meta" style={isHorizontal ? { fontSize: '0.75rem' } : {}}>
+                <div className="video-meta" style={isHorizontal ? { fontSize: '0.75rem' } : { display: 'flex', alignItems: 'center', gap: '4px', marginTop: '4px' }}>
                     <span>{formatViews(video.view_count)}</span>
                     {video.published_at && (
                         <>
-                            <span style={{ margin: '0 4px' }}>•</span>
+                            <span>•</span>
                             <span>{formatTimeAgo(video.published_at)}</span>
                         </>
                     )}

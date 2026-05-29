@@ -9,7 +9,7 @@ function Home() {
     const [error, setError] = useState(null)
     const [user] = useState(authApi.getCurrentUser())
 
-    // 'recommended' | 'trending' | 'notifications'
+    // 'recommended' | 'subscriptions' | 'trending' | 'notifications'
     const [activeTab, setActiveTab] = useState(user ? 'recommended' : 'trending')
     const [syncing, setSyncing] = useState(false)
     const [hasMore, setHasMore] = useState(true)
@@ -82,6 +82,25 @@ function Home() {
         }
     }, [])
 
+    // Fetch Subscriptions feed (latest videos from all subscribed channels)
+    const fetchSubscriptions = useCallback(async () => {
+        isLoadingRef.current = true
+        setLoading(true)
+        setError(null)
+        try {
+            const data = await subscriptionApi.getFeed()
+            setVideos(data)
+            hasMoreRef.current = false
+            setHasMore(false)
+        } catch (err) {
+            console.error("Failed to fetch subscriptions feed:", err)
+            setError("無法載入訂閱內容")
+        } finally {
+            isLoadingRef.current = false
+            setLoading(false)
+        }
+    }, [])
+
     // Fetch Notifications
     const fetchNotifications = useCallback(async () => {
         isLoadingRef.current = true
@@ -111,12 +130,14 @@ function Home() {
 
         if (activeTab === 'recommended' && user) {
             fetchFeed(true)
+        } else if (activeTab === 'subscriptions' && user) {
+            fetchSubscriptions()
         } else if (activeTab === 'notifications' && user) {
             fetchNotifications()
         } else {
             fetchTrending()
         }
-    }, [activeTab, user, fetchFeed, fetchNotifications, fetchTrending])
+    }, [activeTab, user, fetchFeed, fetchSubscriptions, fetchNotifications, fetchTrending])
 
     // Listen for notification changes globally
     useEffect(() => {
@@ -179,6 +200,7 @@ function Home() {
 
     const handleRetry = () => {
         if (activeTab === 'recommended') fetchFeed(true)
+        else if (activeTab === 'subscriptions') fetchSubscriptions()
         else if (activeTab === 'trending') fetchTrending()
         else fetchNotifications()
     }
@@ -211,6 +233,21 @@ function Home() {
                         }}
                     >
                         {user ? '✨ 為您推薦' : '✨ 登入以獲推薦'}
+                    </button>
+                )}
+
+                {user && (
+                    <button
+                        onClick={() => setActiveTab('subscriptions')}
+                        style={{
+                            fontSize: '1.2rem',
+                            fontWeight: activeTab === 'subscriptions' ? 'bold' : 'normal',
+                            color: activeTab === 'subscriptions' ? 'var(--accent)' : 'var(--text-secondary)',
+                            borderBottom: activeTab === 'subscriptions' ? '2px solid var(--accent)' : 'none',
+                            paddingBottom: '4px'
+                        }}
+                    >
+                        📺 訂閱內容
                     </button>
                 )}
 
@@ -259,9 +296,11 @@ function Home() {
                         <div style={{ textAlign: 'center', padding: '40px', color: '#666' }}>
                             {activeTab === 'recommended'
                                 ? '還沒有推薦內容，試著先同步訂閱或觀看一些影片吧！'
-                                : activeTab === 'notifications'
-                                    ? '過去 24 小時內沒有新通知'
-                                    : '沒有影片'}
+                                : activeTab === 'subscriptions'
+                                    ? '還沒有訂閱任何頻道，去訂閱一些頻道吧！'
+                                    : activeTab === 'notifications'
+                                        ? '過去 7 天內沒有新通知'
+                                        : '沒有影片'}
                         </div>
                     ) : (
                         <div className="video-grid">
