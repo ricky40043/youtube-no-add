@@ -825,26 +825,50 @@ function VideoPlayer({
         }
     }
 
-    // Audio (music) mode double-tap seek: left 1/3 = -5s, right 1/3 = +5s, center = play/pause
+    // Audio (music) mode tap zones:
+    //  - Center 1/3: single tap toggles play/pause
+    //  - Left/Right 1/3: ONLY double-tap seeks ±5s (single tap does nothing,
+    //    so it no longer fights with play/pause — per user request)
     const handleAudioTouchEnd = (e) => {
+        e.preventDefault() // block the synthesized click so play/pause doesn't also fire
+        const width = e.currentTarget.offsetWidth
+        const x = e.changedTouches[0].clientX - e.currentTarget.getBoundingClientRect().left
         const now = Date.now()
-        if (now - lastTapTime.current < 300) {
-            e.preventDefault() // block ghost click / zoom
-            const width = e.currentTarget.offsetWidth
-            const x = e.changedTouches[0].clientX - e.currentTarget.getBoundingClientRect().left
-            if (x < width * 0.35) {
+        const isDouble = now - lastTapTime.current < 300
+
+        if (x < width * 0.35) {
+            // Left zone: double-tap rewinds, single tap is ignored
+            if (isDouble) {
                 handleSeekBackward(5)
                 setFeedback({ show: true, text: '5秒', icon: '⏪' })
-            } else if (x > width * 0.65) {
+                setTimeout(() => setFeedback({ show: false, text: '', icon: null }), 600)
+                lastTapTime.current = 0
+            } else {
+                lastTapTime.current = now
+            }
+        } else if (x > width * 0.65) {
+            // Right zone: double-tap forwards, single tap is ignored
+            if (isDouble) {
                 handleSeekForward(5)
                 setFeedback({ show: true, text: '5秒', icon: '⏩' })
+                setTimeout(() => setFeedback({ show: false, text: '', icon: null }), 600)
+                lastTapTime.current = 0
             } else {
-                handleVideoClick()
+                lastTapTime.current = now
             }
-            setTimeout(() => setFeedback({ show: false, text: '', icon: null }), 600)
-            lastTapTime.current = 0
         } else {
-            lastTapTime.current = now
+            // Center zone only: tap toggles play/pause
+            handleVideoClick()
+            lastTapTime.current = 0
+        }
+    }
+
+    // Desktop / mouse fallback: play/pause only when clicking the center zone
+    const handleAudioClick = (e) => {
+        const width = e.currentTarget.offsetWidth
+        const x = e.clientX - e.currentTarget.getBoundingClientRect().left
+        if (x >= width * 0.35 && x <= width * 0.65) {
+            handleVideoClick()
         }
     }
 
@@ -878,7 +902,7 @@ function VideoPlayer({
         <div className="player-container">
             {useAudioOnly ? (
                 // Audio-only player (for background playback)
-                <div className="audio-player" onClick={handleVideoClick} onTouchEnd={handleAudioTouchEnd}>
+                <div className="audio-player" onClick={handleAudioClick} onTouchEnd={handleAudioTouchEnd}>
                     <div className="audio-cover">
                         <img src={videoInfo?.thumbnail} alt={videoInfo?.title} />
                         <div className="audio-overlay">
