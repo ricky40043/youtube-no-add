@@ -145,7 +145,7 @@ function PlaylistDetail() {
                                 }}
                                 title="從清單中移除"
                             >
-                                ✕
+                                🗑️
                             </button>
                         </div>
                     ))
@@ -397,6 +397,43 @@ function PlaylistDetail() {
                 .confirm-delete-btn:disabled {
                     opacity: 0.5;
                     cursor: not-allowed;
+                }
+                
+                @media (max-width: 768px) {
+                    .playlist-header {
+                        flex-direction: column;
+                        align-items: stretch;
+                        gap: 20px;
+                        padding: 16px;
+                    }
+                    .header-actions {
+                        display: flex;
+                        gap: 10px;
+                        width: 100%;
+                    }
+                    .header-actions button {
+                        flex: 1;
+                        justify-content: center;
+                        padding: 12px;
+                        font-size: 14px;
+                    }
+                    .playlist-item {
+                        gap: 10px;
+                        padding: 8px;
+                        position: relative;
+                    }
+                    .thumbnail {
+                        width: 110px;
+                    }
+                    .info h3 {
+                        font-size: 14px;
+                        padding-right: 24px; /* 留空避免與刪除按鈕重疊 */
+                    }
+                    .remove-item-btn {
+                        opacity: 1 !important;
+                        color: #ff4444;
+                        padding: 10px;
+                    }
                 }
             `}</style>
         </div>

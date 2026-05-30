@@ -192,35 +192,57 @@ function Playlists() {
                 }
                 .playlist-grid {
                     display: grid;
-                    grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+                    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
                     gap: 20px;
                 }
                 .playlist-card {
                     background: var(--bg-secondary);
-                    border-radius: 12px;
-                    height: 150px;
+                    border-radius: 16px;
+                    min-height: 140px;
+                    height: auto;
+                    padding: 24px 20px;
                     display: flex;
+                    flex-direction: column;
                     align-items: center;
                     justify-content: center;
                     cursor: pointer;
-                    border: 1px solid transparent;
-                    transition: all 0.2s;
+                    border: 1px solid rgba(255,255,255,0.05);
+                    box-shadow: 0 4px 20px rgba(0,0,0,0.15);
+                    transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
                     text-align: center;
                 }
                 .playlist-card:hover {
                     border-color: var(--accent-color);
-                    transform: translateY(-2px);
+                    transform: translateY(-4px);
+                    box-shadow: 0 8px 30px rgba(139,92,246,0.15);
+                }
+                .card-content {
+                    width: 100%;
+                    display: flex;
+                    flex-direction: column;
+                    align-items: center;
                 }
                 .card-content h3 {
                     margin: 0 0 8px 0;
+                    font-size: 16px;
+                    line-height: 1.4;
+                    font-weight: bold;
+                    display: -webkit-box;
+                    -webkit-line-clamp: 2;
+                    -webkit-box-orient: vertical;
+                    overflow: hidden;
+                    text-overflow: ellipsis;
+                    width: 100%;
+                    color: #fff;
                 }
                 .card-content p {
                     color: var(--text-secondary);
                     margin: 0 0 8px 0;
+                    font-size: 14px;
                 }
                 .date {
                     font-size: 12px;
-                    color: #666;
+                    color: #555;
                 }
             `}</style>
         </div>

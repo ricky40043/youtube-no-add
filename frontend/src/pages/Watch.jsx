@@ -35,6 +35,7 @@ function Watch() {
     const [savedTime, setSavedTime] = useState(0)
     const youtubePlayerRef = useRef(null)
     const videoTimeRef = useRef(0)
+    const lastVideoIdRef = useRef(null)
     
     // Feature: Hide background playback buttons on desktop
     const isMobile = useIsMobile(1024)
@@ -61,7 +62,8 @@ function Watch() {
         }
         // If video ended (0), auto-play related videos
         if (e.data === 0) {
-            console.log('[Watch] YouTube video ended, triggering auto-play')
+            console.log('[Watch] YouTube video ended, triggering handleVideoEnd')
+            handleVideoEnd()
         }
     }
 
@@ -349,32 +351,40 @@ function Watch() {
                     setVideoInfo(info)
                 }
 
-                // Feature A: Load saved progress
-                const savedProgress = localStorage.getItem(`progress_${videoId}`)
-                if (savedProgress) {
-                    try {
-                        // Try parsing new JSON format
-                        const data = JSON.parse(savedProgress)
-                        // Check if expired (24 hours)
-                        if (Date.now() - data.timestamp < 24 * 60 * 60 * 1000) {
-                            console.log(`[Watch] Resuming from ${data.time}s`)
-                            setSavedTime(data.time)
-                        } else {
-                            console.log('[Watch] Progress expired, starting from 0')
-                            setSavedTime(0)
-                        }
-                    } catch (e) {
-                        // Fallback for legacy format (just time string)
-                        const t = parseFloat(savedProgress)
-                        if (!isNaN(t) && t > 0) {
-                            console.log(`[Watch] Resuming from ${t}s (Legacy)`)
-                            setSavedTime(t)
-                        } else {
-                            setSavedTime(0)
-                        }
-                    }
-                } else {
+                // Feature A: Load saved progress (Only resume if it's NOT a newly loaded video)
+                const isNewVideo = lastVideoIdRef.current !== videoId
+                
+                if (isNewVideo) {
+                    console.log('[Watch] New video detected, resetting savedTime to 0')
                     setSavedTime(0)
+                    lastVideoIdRef.current = videoId
+                } else {
+                    const savedProgress = localStorage.getItem(`progress_${videoId}`)
+                    if (savedProgress) {
+                        try {
+                            // Try parsing new JSON format
+                            const data = JSON.parse(savedProgress)
+                            // Check if expired (24 hours)
+                            if (Date.now() - data.timestamp < 24 * 60 * 60 * 1000) {
+                                console.log(`[Watch] Resuming from ${data.time}s`)
+                                setSavedTime(data.time)
+                            } else {
+                                console.log('[Watch] Progress expired, starting from 0')
+                                setSavedTime(0)
+                            }
+                        } catch (e) {
+                            // Fallback for legacy format (just time string)
+                            const t = parseFloat(savedProgress)
+                            if (!isNaN(t) && t > 0) {
+                                console.log(`[Watch] Resuming from ${t}s (Legacy)`)
+                                setSavedTime(t)
+                            } else {
+                                setSavedTime(0)
+                            }
+                        }
+                    } else {
+                        setSavedTime(0)
+                    }
                 }
 
                 // Also get audio URL
