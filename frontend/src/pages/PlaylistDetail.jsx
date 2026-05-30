@@ -64,6 +64,9 @@ function PlaylistDetail() {
     }
 
     const handleRemoveItem = async (itemId) => {
+        const confirmDelete = window.confirm("確定要將此影片從播放清單中移除嗎？");
+        if (!confirmDelete) return;
+
         try {
             await api.delete(`/api/playlists/${id}/items/${itemId}`)
             setItems(items.filter(item => item.id !== itemId))

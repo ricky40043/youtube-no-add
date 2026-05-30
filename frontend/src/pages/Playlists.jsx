@@ -72,7 +72,6 @@ function Playlists() {
     return (
         <div className="playlists-page">
             <header className="page-header">
-                <h1>我的播放清單</h1>
                 <div className="actions">
                     <button
                         className="create-btn"
@@ -149,7 +148,7 @@ function Playlists() {
                 }
                 .page-header {
                     display: flex;
-                    justify-content: space-between;
+                    justify-content: flex-end; /* 將按鈕靠右整齊排列 */
                     align-items: center;
                     margin-bottom: 24px;
                     border-bottom: 1px solid rgba(255,255,255,0.1);
@@ -166,6 +165,7 @@ function Playlists() {
                     border-radius: 20px;
                     cursor: pointer;
                     font-weight: bold;
+                    white-space: nowrap; /* 100% 強制文字在同一行，絕不折行 */
                 }
                 .create-btn {
                     background: var(--accent-color);
