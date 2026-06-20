@@ -22,6 +22,8 @@ services:
       - "20801:8000"
     volumes:
       - ./backend:/app
+    env_file:
+      - .env
     environment:
       - DATABASE_URL=postgresql+asyncpg://postgres:postgres@postgres:5432/youtube_alt
       - REDIS_URL=redis://redis:6379

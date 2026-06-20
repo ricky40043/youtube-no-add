@@ -1,8 +1,11 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from pathlib import Path
 from routers import video, search, user, playlist, history, subscription, feed
 from routers import download
 from database.connection import init_db
+import admin_panel
 
 app = FastAPI(
     title="YouTube Alternative API",
@@ -36,9 +39,16 @@ from routers.search_history import router as search_history_router
 app.include_router(search_history_router, prefix="/api/search-history", tags=["SearchHistory"])
 app.include_router(download.router, prefix="/api/download", tags=["Download"])
 
+# 後台：唯讀資料表瀏覽器（/admin、/api/admin/*）
+app.include_router(admin_panel.router, tags=["Admin"])
+
 
 @app.get("/")
-async def root():
+async def root(request: Request):
+    # admin-youtube.* 子網域直接進後台
+    host = request.headers.get("host", "")
+    if host.startswith("admin"):
+        return FileResponse(str(Path(__file__).resolve().parent / "admin.html"))
     return {"message": "YouTube Alternative API", "status": "running"}
 
 
