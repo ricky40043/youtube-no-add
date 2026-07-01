@@ -49,7 +49,8 @@ def _run_download(job_id: str, video_id: str, dl_type: str, title: str):
                 "-x", "--audio-format", "mp3",
                 "--no-playlist",
                 "-o", output_template,
-                "--extractor-args", "youtube:player_client=android",
+                # 不指定 player_client，改用 yt-dlp 預設。YouTube 已封鎖純 android
+                # client（只會回 storyboard 圖片、拿不到音訊/影片格式），寫死它會讓下載失敗。
                 "--no-progress",
                 "--no-warnings",
             ]
@@ -61,7 +62,8 @@ def _run_download(job_id: str, video_id: str, dl_type: str, title: str):
                 "--merge-output-format", "mp4",
                 "--no-playlist",
                 "-o", output_template,
-                "--extractor-args", "youtube:player_client=android",
+                # 不指定 player_client，改用 yt-dlp 預設。YouTube 已封鎖純 android
+                # client（只會回 storyboard 圖片、拿不到音訊/影片格式），寫死它會讓下載失敗。
                 "--no-progress",
                 "--no-warnings",
             ]
