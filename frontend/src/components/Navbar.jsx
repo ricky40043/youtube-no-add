@@ -45,7 +45,7 @@ function Navbar() {
     const handleLogout = () => {
         authApi.logout()
         setUser(null)
-        navigate('/')
+        navigate('/auth', { replace: true })
     }
 
     const handleSearch = (e) => {
@@ -245,9 +245,15 @@ function Navbar() {
                             <span className="label">播放清單</span>
                         </button>
 
-                        <div className="user-profile">
+                        <button
+                            type="button"
+                            className="user-profile"
+                            onClick={() => navigate('/profile#account-security')}
+                            title="帳戶與密碼設定"
+                        >
                             <span className="username">{user.username}</span>
-                        </div>
+                            <span className="account-label">帳戶／密碼</span>
+                        </button>
                         <button onClick={handleLogout} className="logout-btn">登出</button>
                     </div>
                 ) : (
@@ -314,15 +320,30 @@ function Navbar() {
                 }
 
                 .user-profile {
+                    display: flex;
+                    flex-direction: column;
+                    align-items: flex-start;
+                    gap: 1px;
                     margin-left: 8px;
                     margin-right: 8px;
-                    padding-left: 12px;
+                    padding: 4px 6px 4px 12px;
                     border-left: 1px solid rgba(255,255,255,0.2);
+                    color: white;
+                    cursor: pointer;
+                    border-radius: 0 8px 8px 0;
+                    transition: background .2s;
                 }
+
+                .user-profile:hover { background: rgba(255,255,255,.08); }
                 
                 .username {
                     font-size: 14px;
                     font-weight: 600;
+                }
+
+                .account-label {
+                    color: var(--text-secondary);
+                    font-size: 11px;
                 }
                 
                 .logout-btn {

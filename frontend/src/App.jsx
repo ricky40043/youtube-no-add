@@ -45,9 +45,9 @@ function App() {
             {!isAuthPage && <Navbar />}
             <main className={isAuthPage ? 'auth-main' : 'main-content'}>
                 <Routes>
-                    <Route path="/" element={<Home />} />
-                    <Route path="/watch/:videoId" element={<Watch />} />
-                    <Route path="/search" element={<Search />} />
+                    <Route path="/" element={<ProtectedRoute><Home /></ProtectedRoute>} />
+                    <Route path="/watch/:videoId" element={<ProtectedRoute><Watch /></ProtectedRoute>} />
+                    <Route path="/search" element={<ProtectedRoute><Search /></ProtectedRoute>} />
                     <Route path="/auth" element={<Auth />} />
                     <Route path="/history" element={<ProtectedRoute><History /></ProtectedRoute>} />
                     <Route path="/playlists" element={<ProtectedRoute><Playlists /></ProtectedRoute>} />

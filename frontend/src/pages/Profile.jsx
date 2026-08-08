@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { authApi, historyApi } from '../services/api'
 import api from '../services/api' // For playlists
 
@@ -17,6 +17,7 @@ function Profile() {
     const [securityError, setSecurityError] = useState('')
     const [securityLoading, setSecurityLoading] = useState(false)
     const navigate = useNavigate()
+    const location = useLocation()
 
     useEffect(() => {
         if (!user) {
@@ -31,6 +32,11 @@ function Profile() {
             })
             .catch(error => console.error('Failed to load account details', error))
     }, [user])
+
+    useEffect(() => {
+        if (location.hash !== '#account-security') return
+        document.getElementById('account-security')?.scrollIntoView({ behavior: 'smooth' })
+    }, [location.hash])
 
     const fetchData = async () => {
         try {
@@ -50,7 +56,7 @@ function Profile() {
 
     const handleLogout = () => {
         authApi.logout()
-        navigate('/')
+        navigate('/auth', { replace: true })
     }
 
     const handleChangePassword = async (event) => {
@@ -103,9 +109,18 @@ function Profile() {
                     <h1>{user.username}</h1>
                     <p>@{user.username}</p>
                 </div>
-                <button onClick={handleLogout} className="logout-btn">
-                    登出
-                </button>
+                <div className="profile-actions">
+                    <button
+                        type="button"
+                        className="password-settings-btn"
+                        onClick={() => document.getElementById('account-security')?.scrollIntoView({ behavior: 'smooth' })}
+                    >
+                        更改密碼
+                    </button>
+                    <button onClick={handleLogout} className="logout-btn">
+                        登出
+                    </button>
+                </div>
             </div>
 
             {/* History Section */}
@@ -130,7 +145,7 @@ function Profile() {
                 )}
             </div>
 
-            <div className="profile-section account-security-section">
+            <div id="account-security" className="profile-section account-security-section">
                 <div className="section-header">
                     <div>
                         <h2>帳戶安全</h2>
@@ -280,6 +295,21 @@ function Profile() {
                     color: var(--text-primary);
                     border-radius: 20px;
                     font-weight: 500;
+                }
+
+                .profile-actions {
+                    display: flex;
+                    align-items: center;
+                    gap: 10px;
+                }
+
+                .password-settings-btn {
+                    padding: 8px 16px;
+                    border-radius: 20px;
+                    background: var(--accent);
+                    color: white;
+                    font-weight: 700;
+                    cursor: pointer;
                 }
                 
                 .profile-section {
@@ -475,6 +505,8 @@ function Profile() {
                     .security-grid { grid-template-columns: 1fr; }
                     .profile-header { padding-left: 16px; padding-right: 16px; }
                     .profile-section { padding-left: 16px; padding-right: 16px; }
+                    .profile-actions { flex-direction: column; align-items: stretch; }
+                    .profile-actions button { white-space: nowrap; }
                 }
             `}</style>
         </div>
