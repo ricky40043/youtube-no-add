@@ -1,15 +1,12 @@
 import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { motion, AnimatePresence } from 'framer-motion'
-
-import api, { authApi, historyApi } from '../services/api'
-import VideoCard from '../components/VideoCard'
+import { authApi, historyApi } from '../services/api'
 import ConfirmModal from '../components/ConfirmModal'
 
 function History() {
     const [history, setHistory] = useState([])
     const [loading, setLoading] = useState(true)
-    const [user, setUser] = useState(authApi.getCurrentUser())
+    const [user] = useState(authApi.getCurrentUser())
     const navigate = useNavigate()
     
     // Swipe state
@@ -24,7 +21,7 @@ function History() {
     const fetchHistory = async () => {
         try {
             setLoading(true)
-            const data = await historyApi.get(user.id)
+            const data = await historyApi.get()
             setHistory(data)
         } catch (err) {
             console.error("Failed to load history", err)
@@ -48,7 +45,7 @@ function History() {
             message: '確定要刪除這筆觀看紀錄嗎？',
             onConfirm: async () => {
                 try {
-                    await historyApi.deleteItem(user.id, videoId)
+                    await historyApi.deleteItem(videoId)
                     setHistory(prev => prev.filter(item => item.video_id !== videoId))
                 } catch (err) {
                     console.error("Failed to delete history item", err)
@@ -65,7 +62,7 @@ function History() {
             message: '確定要清空所有觀看紀錄嗎？此動作無法復原。',
             onConfirm: async () => {
                 try {
-                    await historyApi.clearAll(user.id)
+                    await historyApi.clearAll()
                     setHistory([])
                 } catch (err) {
                     console.error("Failed to clear history", err)

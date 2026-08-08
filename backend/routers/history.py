@@ -2,7 +2,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from database.connection import get_db
-from database.models import WatchHistory
+from database.models import User, WatchHistory
+from routers.user import get_current_user
 from pydantic import BaseModel
 from datetime import datetime
 from typing import List, Optional
@@ -12,7 +13,6 @@ router = APIRouter(
 )
 
 class HistoryCreate(BaseModel):
-    user_id: int # To be injected via auth later
     video_id: str
     title: str
     thumbnail: str
@@ -27,7 +27,7 @@ class HistoryResponse(BaseModel):
     progress_seconds: int
 
     class Config:
-        orm_mode = True
+        from_attributes = True
 
     @classmethod
     def from_orm(cls, obj):
@@ -41,10 +41,14 @@ class HistoryResponse(BaseModel):
         )
 
 @router.get("/", response_model=List[HistoryResponse])
-async def get_history(user_id: int, limit: int = 50, db: AsyncSession = Depends(get_db)):
+async def get_history(
+    limit: int = 50,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
     result = await db.execute(
         select(WatchHistory)
-        .filter(WatchHistory.user_id == user_id)
+        .filter(WatchHistory.user_id == current_user.id)
         .order_by(WatchHistory.watched_at.desc())
         .limit(limit)
     )
@@ -52,12 +56,16 @@ async def get_history(user_id: int, limit: int = 50, db: AsyncSession = Depends(
     return [HistoryResponse.from_orm(item) for item in items]
 
 @router.post("/", response_model=HistoryResponse)
-async def add_history(item: HistoryCreate, db: AsyncSession = Depends(get_db)):
+async def add_history(
+    item: HistoryCreate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
     # Check if entry exists to update timestamp instead of duplicate?
     # For now, let's simple update if exists
     result = await db.execute(
         select(WatchHistory)
-        .filter(WatchHistory.user_id == item.user_id, WatchHistory.video_id == item.video_id)
+        .filter(WatchHistory.user_id == current_user.id, WatchHistory.video_id == item.video_id)
     )
     existing = result.scalars().first()
     
@@ -69,7 +77,7 @@ async def add_history(item: HistoryCreate, db: AsyncSession = Depends(get_db)):
         return HistoryResponse.from_orm(existing)
     
     new_entry = WatchHistory(
-        user_id=item.user_id,
+        user_id=current_user.id,
         video_id=item.video_id,
         video_title=item.title,  # Map API 'title' to DB 'video_title'
         video_thumbnail=item.thumbnail,  # Map API 'thumbnail' to DB 'video_thumbnail'
@@ -80,20 +88,30 @@ async def add_history(item: HistoryCreate, db: AsyncSession = Depends(get_db)):
     await db.refresh(new_entry)
     return HistoryResponse.from_orm(new_entry)
 
-@router.delete("/{user_id}/{video_id}")
-async def delete_history_item(user_id: int, video_id: str, db: AsyncSession = Depends(get_db)):
+@router.delete("/item/{video_id}")
+async def delete_history_item(
+    video_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
     """Delete a specific video from user's watch history"""
     from sqlalchemy import delete
-    stmt = delete(WatchHistory).where(WatchHistory.user_id == user_id, WatchHistory.video_id == video_id)
+    stmt = delete(WatchHistory).where(
+        WatchHistory.user_id == current_user.id,
+        WatchHistory.video_id == video_id,
+    )
     await db.execute(stmt)
     await db.commit()
     return {"status": "success", "message": f"Video {video_id} removed from history"}
 
-@router.delete("/{user_id}/clear")
-async def clear_history(user_id: int, db: AsyncSession = Depends(get_db)):
+@router.delete("/clear")
+async def clear_history(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
     """Clear all watch history for a user"""
     from sqlalchemy import delete
-    stmt = delete(WatchHistory).where(WatchHistory.user_id == user_id)
+    stmt = delete(WatchHistory).where(WatchHistory.user_id == current_user.id)
     await db.execute(stmt)
     await db.commit()
     return {"status": "success", "message": "All watch history cleared"}

@@ -945,7 +945,6 @@ function VideoPlayer({
                         ref={videoRef}
                         className="react-player"
                         playsInline
-                        webkit-playsinline="true"
                         autoPlay
                         onClick={handleVideoClick}
                         onTimeUpdate={handleTimeUpdate}

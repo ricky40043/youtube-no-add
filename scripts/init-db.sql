@@ -5,9 +5,26 @@ CREATE TABLE IF NOT EXISTS users (
     id SERIAL PRIMARY KEY,
     username VARCHAR(50) UNIQUE NOT NULL,
     password_hash VARCHAR(255) NOT NULL,
+    email VARCHAR UNIQUE,
+    email_verified BOOLEAN NOT NULL DEFAULT FALSE,
+    password_version INTEGER NOT NULL DEFAULT 0,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+
+CREATE TABLE IF NOT EXISTS account_tokens (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    token_hash VARCHAR(64) UNIQUE NOT NULL,
+    purpose VARCHAR(32) NOT NULL,
+    pending_value VARCHAR,
+    expires_at TIMESTAMP NOT NULL,
+    used_at TIMESTAMP,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_account_tokens_user_id ON account_tokens(user_id);
+CREATE INDEX IF NOT EXISTS idx_account_tokens_purpose ON account_tokens(purpose);
 
 -- Watch history table
 CREATE TABLE IF NOT EXISTS watch_history (

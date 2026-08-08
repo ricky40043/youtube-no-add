@@ -20,6 +20,13 @@ function BottomNav() {
     return (
         <div className="bottom-nav">
 
+            <Link to="/" className={`nav-item ${location.pathname === '/' ? 'active' : ''}`}>
+                <svg viewBox="0 0 24 24">
+                    <path d="M12 3l9 8h-3v9h-5v-6h-2v6H6v-9H3l9-8z" />
+                </svg>
+                <span className="label">首頁</span>
+            </Link>
+
             <Link to="/subscriptions" className={`nav-item ${location.pathname === '/subscriptions' ? 'active' : ''}`}>
                 <svg viewBox="0 0 24 24">
                     <path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h9l-3-3zm9.54-1.5l-1.41-1.41-3.07 3.07-1.39-1.39-1.41 1.41 2.8 2.8 4.48-4.48z" />
