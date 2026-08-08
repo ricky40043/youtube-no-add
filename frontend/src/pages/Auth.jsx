@@ -100,8 +100,6 @@ function Auth() {
 
     return (
         <div className={`auth-page auth-page--${mode}`}>
-            <button className="auth-home-link" onClick={() => navigate('/')}>← 返回首頁</button>
-
             <motion.section
                 className="auth-container"
                 initial={{ opacity: 0, y: 18 }}
@@ -316,18 +314,6 @@ const authStyles = `
         pointer-events: none;
     }
 
-    .auth-home-link {
-        position: absolute;
-        top: 24px;
-        left: 24px;
-        z-index: 2;
-        color: var(--text-secondary);
-        padding: 8px 12px;
-        border-radius: 999px;
-    }
-
-    .auth-home-link:hover { background: rgba(255,255,255,.08); color: white; }
-
     .auth-container {
         position: relative;
         z-index: 1;
@@ -380,7 +366,6 @@ const authStyles = `
 
     @media (max-width: 600px) {
         .auth-page { align-items: start; padding: 68px 14px 24px; }
-        .auth-home-link { top: 14px; left: 10px; }
         .auth-container { padding: 24px 20px; border-radius: 20px; }
     }
 `
