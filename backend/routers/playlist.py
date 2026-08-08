@@ -1,10 +1,10 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from sqlalchemy.orm import selectinload
 from sqlalchemy import func
 from database.connection import get_db
 from database.models import User, Playlist, PlaylistItem
+from routers.user import get_current_user, get_optional_current_user
 from services.ytdlp_service import ytdlp_service
 from pydantic import BaseModel
 from typing import List, Optional
@@ -27,11 +27,10 @@ class PlaylistBase(BaseModel):
     description: Optional[str] = None
 
 class PlaylistCreate(PlaylistBase):
-    user_id: int # Auth will inject this properly later
+    pass
 
 class ImportPlaylistRequest(BaseModel):
     url: str
-    user_id: int # Mock auth for now
 
 class PlaylistResponse(BaseModel):
     id: int
@@ -42,7 +41,7 @@ class PlaylistResponse(BaseModel):
     items_count: int = 0  # Number of items in the playlist
 
     class Config:
-        orm_mode = True
+        from_attributes = True
         
     @classmethod
     def from_orm(cls, obj, items_count: int = 0):
@@ -65,7 +64,7 @@ class PlaylistItemResponse(BaseModel):
     added_at: datetime
     
     class Config:
-        orm_mode = True
+        from_attributes = True
         
     @classmethod
     def from_orm(cls, obj):
@@ -82,13 +81,15 @@ class PlaylistItemResponse(BaseModel):
 # CRUD Endpoints
 
 @router.get("/", response_model=List[PlaylistResponse])
-async def get_playlists(user_id: int, db: AsyncSession = Depends(get_db)):
-    # TODO: Get user_id from auth token dependency
+async def get_playlists(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
     # Query Playlists with a count of their items
     stmt = (
         select(Playlist, func.count(PlaylistItem.id).label("item_count"))
         .outerjoin(PlaylistItem, Playlist.id == PlaylistItem.playlist_id)
-        .filter(Playlist.user_id == user_id)
+        .filter(Playlist.user_id == current_user.id)
         .group_by(Playlist.id)
     )
     result = await db.execute(stmt)
@@ -101,12 +102,16 @@ async def get_playlists(user_id: int, db: AsyncSession = Depends(get_db)):
     ]
 
 @router.post("/", response_model=PlaylistResponse)
-async def create_playlist(playlist: PlaylistCreate, db: AsyncSession = Depends(get_db)):
+async def create_playlist(
+    playlist: PlaylistCreate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
     # Verify user exists (optional if FK valid)
     new_playlist = Playlist(
         name=playlist.title,  # Map API 'title' to DB 'name'
         description=playlist.description,
-        user_id=playlist.user_id
+        user_id=current_user.id
     )
     db.add(new_playlist)
     await db.commit()
@@ -114,18 +119,37 @@ async def create_playlist(playlist: PlaylistCreate, db: AsyncSession = Depends(g
     return PlaylistResponse.from_orm(new_playlist)
 
 @router.get("/{playlist_id}", response_model=PlaylistResponse)
-async def get_playlist(playlist_id: int, db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(Playlist).filter(Playlist.id == playlist_id))
+async def get_playlist(
+    playlist_id: int,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(select(Playlist).filter(
+        Playlist.id == playlist_id,
+        Playlist.user_id == current_user.id,
+    ))
     playlist = result.scalars().first()
     if not playlist:
         raise HTTPException(status_code=404, detail="Playlist not found")
     return PlaylistResponse.from_orm(playlist)
 
 @router.get("/{playlist_id}/items", response_model=List[PlaylistItemResponse])
-async def get_playlist_items(playlist_id: str, db: AsyncSession = Depends(get_db)):
+async def get_playlist_items(
+    playlist_id: str,
+    current_user: Optional[User] = Depends(get_optional_current_user),
+    db: AsyncSession = Depends(get_db),
+):
     # Check if playlist_id is numeric (Internal DB ID)
     if playlist_id.isdigit():
+        if not current_user:
+            raise HTTPException(status_code=401, detail="Not authenticated")
         pid = int(playlist_id)
+        playlist_result = await db.execute(select(Playlist).filter(
+            Playlist.id == pid,
+            Playlist.user_id == current_user.id,
+        ))
+        if not playlist_result.scalars().first():
+            raise HTTPException(status_code=404, detail="Playlist not found")
         result = await db.execute(
             select(PlaylistItem)
             .filter(PlaylistItem.playlist_id == pid)
@@ -167,9 +191,17 @@ async def get_playlist_items(playlist_id: str, db: AsyncSession = Depends(get_db
             raise HTTPException(status_code=404, detail="Playlist not found or invalid")
 
 @router.post("/{playlist_id}/items", response_model=PlaylistItemResponse)
-async def add_item_to_playlist(playlist_id: int, item: PlaylistItemBase, db: AsyncSession = Depends(get_db)):
+async def add_item_to_playlist(
+    playlist_id: int,
+    item: PlaylistItemBase,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
     # Check if playlist exists
-    playlist_result = await db.execute(select(Playlist).filter(Playlist.id == playlist_id))
+    playlist_result = await db.execute(select(Playlist).filter(
+        Playlist.id == playlist_id,
+        Playlist.user_id == current_user.id,
+    ))
     if not playlist_result.scalars().first():
         raise HTTPException(status_code=404, detail="Playlist not found")
 
@@ -187,7 +219,18 @@ async def add_item_to_playlist(playlist_id: int, item: PlaylistItemBase, db: Asy
     return PlaylistItemResponse.from_orm(new_item)
 
 @router.delete("/{playlist_id}/items/{item_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def remove_item_from_playlist(playlist_id: int, item_id: int, db: AsyncSession = Depends(get_db)):
+async def remove_item_from_playlist(
+    playlist_id: int,
+    item_id: int,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    playlist_result = await db.execute(select(Playlist).filter(
+        Playlist.id == playlist_id,
+        Playlist.user_id == current_user.id,
+    ))
+    if not playlist_result.scalars().first():
+        raise HTTPException(status_code=404, detail="Playlist not found")
     result = await db.execute(
         select(PlaylistItem).filter(
             PlaylistItem.id == item_id,
@@ -204,8 +247,15 @@ async def remove_item_from_playlist(playlist_id: int, item_id: int, db: AsyncSes
 
 
 @router.delete("/{playlist_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_playlist(playlist_id: int, db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(Playlist).filter(Playlist.id == playlist_id))
+async def delete_playlist(
+    playlist_id: int,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(select(Playlist).filter(
+        Playlist.id == playlist_id,
+        Playlist.user_id == current_user.id,
+    ))
     playlist = result.scalars().first()
     if not playlist:
         raise HTTPException(status_code=404, detail="Playlist not found")
@@ -219,8 +269,16 @@ class PlaylistUpdate(BaseModel):
     description: Optional[str] = None
 
 @router.put("/{playlist_id}", response_model=PlaylistResponse)
-async def update_playlist(playlist_id: int, update: PlaylistUpdate, db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(Playlist).filter(Playlist.id == playlist_id))
+async def update_playlist(
+    playlist_id: int,
+    update: PlaylistUpdate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(select(Playlist).filter(
+        Playlist.id == playlist_id,
+        Playlist.user_id == current_user.id,
+    ))
     playlist = result.scalars().first()
     if not playlist:
         raise HTTPException(status_code=404, detail="Playlist not found")
@@ -235,7 +293,11 @@ async def update_playlist(playlist_id: int, update: PlaylistUpdate, db: AsyncSes
     return PlaylistResponse.from_orm(playlist)
 
 @router.post("/import", response_model=PlaylistResponse)
-async def import_playlist(request: ImportPlaylistRequest, db: AsyncSession = Depends(get_db)):
+async def import_playlist(
+    request: ImportPlaylistRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
     # 1. Fetch info from YouTube
     info = await ytdlp_service.get_playlist_info(request.url)
     if not info:
@@ -245,7 +307,7 @@ async def import_playlist(request: ImportPlaylistRequest, db: AsyncSession = Dep
     new_playlist = Playlist(
         name=info['title'],
         description=f"Imported from YouTube (Original ID: {info['id']})",
-        user_id=request.user_id 
+        user_id=current_user.id
     )
     db.add(new_playlist)
     await db.commit()

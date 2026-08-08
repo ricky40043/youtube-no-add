@@ -5,6 +5,7 @@ from pathlib import Path
 from routers import video, search, user, playlist, history, subscription, feed
 from routers import download
 from database.connection import init_db
+from database.migrations import run_compatibility_migrations
 import admin_panel
 
 app = FastAPI(
@@ -16,6 +17,7 @@ app = FastAPI(
 @app.on_event("startup")
 async def startup_event():
     await init_db()
+    await run_compatibility_migrations()
 
 # CORS configuration - Allow all origins for mobile testing
 app.add_middleware(

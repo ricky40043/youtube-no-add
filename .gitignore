@@ -5,6 +5,10 @@ node_modules
 /backend/downloads/
 venv/
 .env
+.jwt_secret
+backend/.jwt_secret
+*.log
+backend_logs.txt
 
 # Python
 __pycache__/

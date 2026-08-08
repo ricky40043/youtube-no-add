@@ -292,7 +292,7 @@ function Watch() {
 
                 // Also try to get title
                 try {
-                    const playlists = await playlistApi.getAll(authApi.getCurrentUser()?.id)
+                    const playlists = await playlistApi.getAll()
                     const currentList = playlists.find(p => p.id.toString() === playlistId)
                     if (currentList) setPlaylistTitle(currentList.title)
                 } catch (e) {
@@ -413,7 +413,6 @@ function Watch() {
                     // If logged in, also save to server
                     if (user) {
                         historyApi.add({
-                            user_id: user.id || 1,
                             video_id: videoId,
                             title: info.title,
                             thumbnail: info.thumbnail,

@@ -17,9 +17,24 @@ class Settings(BaseSettings):
     
     # yt-dlp Cookies (for 1080p/Premium)
     ytdlp_cookies_file: str = "cookies.txt"
+
+    # Authentication
+    jwt_secret: str = ""
+    jwt_algorithm: str = "HS256"
+    access_token_expire_minutes: int = 10080  # 7 days
+    frontend_url: str = "http://localhost:5173"
+
+    # Transactional email (optional until recovery email is configured)
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_username: str = ""
+    smtp_password: str = ""
+    smtp_from_email: str = ""
+    smtp_use_tls: bool = True
     
     class Config:
         env_file = ".env"
+        extra = "ignore"
 
 
 @lru_cache()

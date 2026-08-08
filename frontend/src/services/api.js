@@ -9,6 +9,12 @@ const api = axios.create({
     timeout: 30000,
 })
 
+const clearAuthStorage = () => {
+    localStorage.removeItem('token')
+    localStorage.removeItem('username')
+    localStorage.removeItem('userId')
+}
+
 export const videoApi = {
     // Get video information
     getInfo: async (videoId) => {
@@ -94,8 +100,8 @@ export const searchHistoryApi = {
 }
 
 export const historyApi = {
-    get: async (userId) => {
-        const response = await api.get('/api/history/', { params: { user_id: userId } })
+    get: async () => {
+        const response = await api.get('/api/history/')
         return response.data
     },
     add: async (data) => {
@@ -103,19 +109,19 @@ export const historyApi = {
         const response = await api.post('/api/history/', data)
         return response.data
     },
-    deleteItem: async (userId, videoId) => {
-        const response = await api.delete(`/api/history/${userId}/${encodeURIComponent(videoId)}`)
+    deleteItem: async (videoId) => {
+        const response = await api.delete(`/api/history/item/${encodeURIComponent(videoId)}`)
         return response.data
     },
-    clearAll: async (userId) => {
-        const response = await api.delete(`/api/history/${userId}/clear`)
+    clearAll: async () => {
+        const response = await api.delete('/api/history/clear')
         return response.data
     }
 }
 
 export const playlistApi = {
-    getAll: async (userId) => {
-        const response = await api.get('/api/playlists/', { params: { user_id: userId } })
+    getAll: async () => {
+        const response = await api.get('/api/playlists/')
         return response.data
     },
     create: async (data) => {
@@ -214,7 +220,7 @@ export const authApi = {
         const response = await api.post('/api/user/login', { username, password })
         if (response.data.access_token) {
             localStorage.setItem('token', response.data.access_token)
-            localStorage.setItem('username', username)
+            localStorage.setItem('username', response.data.username || username)
             if (response.data.user_id) {
                 localStorage.setItem('userId', response.data.user_id)
             }
@@ -228,10 +234,49 @@ export const authApi = {
         return response.data
     },
 
+    getMe: async () => {
+        const response = await api.get('/api/user/me')
+        localStorage.setItem('username', response.data.username)
+        localStorage.setItem('userId', response.data.id)
+        return response.data
+    },
+
+    changePassword: async (currentPassword, newPassword) => {
+        const response = await api.post('/api/user/password/change', {
+            current_password: currentPassword,
+            new_password: newPassword,
+        })
+        return response.data
+    },
+
+    requestRecoveryEmail: async (currentPassword, email) => {
+        const response = await api.post('/api/user/recovery-email/request', {
+            current_password: currentPassword,
+            email,
+        })
+        return response.data
+    },
+
+    verifyRecoveryEmail: async (token) => {
+        const response = await api.post('/api/user/recovery-email/verify', { token })
+        return response.data
+    },
+
+    forgotPassword: async (account) => {
+        const response = await api.post('/api/user/password/forgot', { account })
+        return response.data
+    },
+
+    resetPassword: async (token, newPassword) => {
+        const response = await api.post('/api/user/password/reset', {
+            token,
+            new_password: newPassword,
+        })
+        return response.data
+    },
+
     logout: () => {
-        localStorage.removeItem('token')
-        localStorage.removeItem('username')
-        localStorage.removeItem('userId')
+        clearAuthStorage()
         window.dispatchEvent(new Event('auth-change'))
     },
 
@@ -242,6 +287,19 @@ export const authApi = {
         
         if (!token || !userId) {
             return null  // Not logged in
+        }
+
+        try {
+            const encodedPayload = token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')
+            const paddedPayload = encodedPayload.padEnd(Math.ceil(encodedPayload.length / 4) * 4, '=')
+            const payload = JSON.parse(atob(paddedPayload))
+            if (payload.exp && payload.exp * 1000 <= Date.now()) {
+                clearAuthStorage()
+                return null
+            }
+        } catch {
+            clearAuthStorage()
+            return null
         }
         return {
             username,
@@ -271,5 +329,17 @@ api.interceptors.request.use((config) => {
     }
     return config
 })
+
+api.interceptors.response.use(
+    (response) => response,
+    (error) => {
+        if (error.response?.status === 401 && !error.config?.url?.endsWith('/api/user/login')) {
+            clearAuthStorage()
+            window.dispatchEvent(new Event('auth-change'))
+            window.dispatchEvent(new Event('auth-expired'))
+        }
+        return Promise.reject(error)
+    }
+)
 
 export default api

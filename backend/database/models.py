@@ -9,12 +9,31 @@ class User(Base):
     id = Column(Integer, primary_key=True, index=True)
     username = Column(String, unique=True, index=True)
     password_hash = Column(String)
+    email = Column(String, unique=True, index=True, nullable=True)
+    email_verified = Column(Boolean, default=False, nullable=False)
+    password_version = Column(Integer, default=0, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
     
     playlists = relationship("Playlist", back_populates="owner")
     history = relationship("WatchHistory", back_populates="user")
     subscriptions = relationship("Subscription", back_populates="user")
     search_history = relationship("SearchHistory", back_populates="user")
+    account_tokens = relationship("AccountToken", back_populates="user", cascade="all, delete-orphan")
+
+
+class AccountToken(Base):
+    __tablename__ = "account_tokens"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False)
+    token_hash = Column(String(64), unique=True, index=True, nullable=False)
+    purpose = Column(String(32), index=True, nullable=False)
+    pending_value = Column(String, nullable=True)
+    expires_at = Column(DateTime, nullable=False)
+    used_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    user = relationship("User", back_populates="account_tokens")
 
 class Playlist(Base):
     __tablename__ = "playlists"

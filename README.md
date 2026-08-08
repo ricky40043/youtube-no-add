@@ -31,9 +31,9 @@ docker-compose up -d --build
 ```
 
 啟動後訪問：
-- **前端**: http://localhost:5173
-- **後端 API**: http://localhost:8000
-- **API 文件**: http://localhost:8000/docs
+- **前端**: http://localhost:20800
+- **後端 API**: http://localhost:20801
+- **API 文件**: http://localhost:20801/docs
 
 ### 停止服務
 
@@ -87,6 +87,22 @@ youtube-no-add/
 | 影片解析 | yt-dlp + Invidious API |
 | 資料庫 | PostgreSQL + Redis |
 | 部署 | Docker Compose |
+
+## 🔐 帳戶恢復設定
+
+登入、註冊與更改密碼不需要額外服務。若要啟用恢復信箱及忘記密碼寄信，請在 `.env` 設定：
+
+```env
+FRONTEND_URL=https://你的前端網域
+SMTP_HOST=smtp.example.com
+SMTP_PORT=587
+SMTP_USERNAME=
+SMTP_PASSWORD=
+SMTP_FROM_EMAIL=no-reply@example.com
+SMTP_USE_TLS=true
+```
+
+可複製 `.env.example` 作為設定起點。SMTP 未設定時，忘記密碼 API 會明確回覆服務尚未啟用，不會假裝已寄信。
 
 ## 📝 API 端點
 
