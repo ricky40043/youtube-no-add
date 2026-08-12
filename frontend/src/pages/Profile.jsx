@@ -175,7 +175,6 @@ function Profile() {
                             value={newPassword}
                             onChange={(event) => setNewPassword(event.target.value)}
                             required
-                            minLength={6}
                             autoComplete="new-password"
                         />
                         <label htmlFor="profile-confirm-password">再次輸入新密碼</label>
@@ -185,7 +184,6 @@ function Profile() {
                             value={confirmPassword}
                             onChange={(event) => setConfirmPassword(event.target.value)}
                             required
-                            minLength={6}
                             autoComplete="new-password"
                         />
                         <button type="submit" className="security-primary-btn" disabled={securityLoading}>

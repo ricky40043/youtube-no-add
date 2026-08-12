@@ -48,7 +48,7 @@ JWT_SECRET = load_jwt_secret()
 
 class UserCreate(BaseModel):
     username: str = Field(min_length=3, max_length=50)
-    password: str = Field(min_length=6, max_length=128)
+    password: str
 
 
 class UserLogin(BaseModel):
@@ -75,7 +75,7 @@ class UserResponse(BaseModel):
 
 class PasswordChangeRequest(BaseModel):
     current_password: str
-    new_password: str = Field(min_length=6, max_length=128)
+    new_password: str
 
 
 class RecoveryEmailRequest(BaseModel):
@@ -93,7 +93,7 @@ class ForgotPasswordRequest(BaseModel):
 
 class ResetPasswordRequest(BaseModel):
     token: str
-    new_password: str = Field(min_length=6, max_length=128)
+    new_password: str
 
 
 def legacy_hash_password(password: str) -> str:
