@@ -184,10 +184,8 @@ function Auth() {
                                             value={password}
                                             onChange={(event) => setPassword(event.target.value)}
                                             required
-                                            minLength={6}
-                                            maxLength={128}
                                             autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
-                                            placeholder={mode === 'login' ? '請輸入密碼' : '至少 6 個字元'}
+                                            placeholder="請輸入密碼"
                                         />
                                     </div>
                                 )}
@@ -217,10 +215,8 @@ function Auth() {
                                                 value={newPassword}
                                                 onChange={(event) => setNewPassword(event.target.value)}
                                                 required
-                                                minLength={6}
-                                                maxLength={128}
                                                 autoComplete="new-password"
-                                                placeholder="至少 6 個字元"
+                                                placeholder="請輸入新密碼"
                                             />
                                         </div>
                                         <div className="auth-form-group">
@@ -231,8 +227,6 @@ function Auth() {
                                                 value={confirmPassword}
                                                 onChange={(event) => setConfirmPassword(event.target.value)}
                                                 required
-                                                minLength={6}
-                                                maxLength={128}
                                                 autoComplete="new-password"
                                                 placeholder="再次輸入新密碼"
                                             />
