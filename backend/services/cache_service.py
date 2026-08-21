@@ -50,6 +50,18 @@ class CacheService:
         except Exception as e:
             print(f"Cache delete error: {e}")
             return False
+
+    async def delete_pattern(self, pattern: str) -> bool:
+        """Delete all keys matching a narrowly-scoped Redis glob pattern."""
+        try:
+            r = await self.get_redis()
+            keys = [key async for key in r.scan_iter(match=pattern, count=100)]
+            if keys:
+                await r.delete(*keys)
+            return True
+        except Exception as e:
+            print(f"Cache pattern delete error: {e}")
+            return False
     
     def video_key(self, video_id: str) -> str:
         """Generate cache key for video info"""
