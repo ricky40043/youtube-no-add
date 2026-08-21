@@ -18,6 +18,7 @@ function Home() {
     const cursorRef = useRef(null)
     const hasMoreRef = useRef(true)
     const isLoadingRef = useRef(false)
+    const viewRequestRef = useRef(0)
     const observerRef = useRef(null)
     const sentinelRef = useRef(null)
     const fetchFeedRef = useRef(null)
@@ -33,6 +34,7 @@ function Home() {
         isLoadingRef.current = true
         setLoading(true)
         setError(null)
+        const requestId = viewRequestRef.current
 
         try {
             const currentCursor = init ? null : cursorRef.current
@@ -40,6 +42,8 @@ function Home() {
             
             const data = await feedApi.getFeed(currentCursor)
             console.log('[Home] API returned:', data.items?.length, 'items, cursor:', data.next_cursor)
+
+            if (requestId !== viewRequestRef.current) return
 
             if (init) {
                 setVideos(data.items || [])
@@ -58,8 +62,10 @@ function Home() {
             console.error('[Home] Error:', err)
             setError('無法載入更多推薦，請稍後再試')
         } finally {
-            isLoadingRef.current = false
-            setLoading(false)
+            if (requestId === viewRequestRef.current) {
+                isLoadingRef.current = false
+                setLoading(false)
+            }
         }
     }, [])
 
@@ -68,8 +74,10 @@ function Home() {
         isLoadingRef.current = true
         setLoading(true)
         setError(null)
+        const requestId = viewRequestRef.current
         try {
             const results = await searchApi.getTrending('TW')
+            if (requestId !== viewRequestRef.current) return
             setVideos(results)
             hasMoreRef.current = false
             setHasMore(false)
@@ -77,8 +85,10 @@ function Home() {
             console.error('Failed to fetch trending:', err)
             setError('無法載入熱門影片')
         } finally {
-            isLoadingRef.current = false
-            setLoading(false)
+            if (requestId === viewRequestRef.current) {
+                isLoadingRef.current = false
+                setLoading(false)
+            }
         }
     }, [])
 
@@ -87,8 +97,10 @@ function Home() {
         isLoadingRef.current = true
         setLoading(true)
         setError(null)
+        const requestId = viewRequestRef.current
         try {
             const data = await subscriptionApi.getFeed()
+            if (requestId !== viewRequestRef.current) return
             setVideos(data)
             hasMoreRef.current = false
             setHasMore(false)
@@ -96,8 +108,10 @@ function Home() {
             console.error("Failed to fetch subscriptions feed:", err)
             setError("無法載入訂閱內容")
         } finally {
-            isLoadingRef.current = false
-            setLoading(false)
+            if (requestId === viewRequestRef.current) {
+                isLoadingRef.current = false
+                setLoading(false)
+            }
         }
     }, [])
 
@@ -106,8 +120,10 @@ function Home() {
         isLoadingRef.current = true
         setLoading(true)
         setError(null)
+        const requestId = viewRequestRef.current
         try {
             const data = await subscriptionApi.getNotifications()
+            if (requestId !== viewRequestRef.current) return
             setVideos(data)
             hasMoreRef.current = false
             setHasMore(false)
@@ -115,13 +131,17 @@ function Home() {
             console.error("Failed to fetch notifications:", err)
             setError("無法載入通知")
         } finally {
-            isLoadingRef.current = false
-            setLoading(false)
+            if (requestId === viewRequestRef.current) {
+                isLoadingRef.current = false
+                setLoading(false)
+            }
         }
     }, [])
 
     // Initial load when tab changes
     useEffect(() => {
+        viewRequestRef.current += 1
+        isLoadingRef.current = false
         window.scrollTo(0, 0)
         setVideos([])
         cursorRef.current = null
@@ -216,7 +236,7 @@ function Home() {
             <div style={{
                 display: 'flex',
                 alignItems: 'center',
-                gap: '24px',
+                gap: '0',
                 marginBottom: '24px',
                 borderBottom: '1px solid var(--border)',
                 paddingBottom: '16px'
@@ -229,10 +249,13 @@ function Home() {
                             fontWeight: activeTab === 'recommended' ? 'bold' : 'normal',
                             color: activeTab === 'recommended' ? 'var(--accent)' : 'var(--text-secondary)',
                             borderBottom: activeTab === 'recommended' ? '2px solid var(--accent)' : 'none',
-                            paddingBottom: '4px'
+                            paddingBottom: '4px',
+                            flex: 1,
+                            minWidth: 0,
+                            textAlign: 'center'
                         }}
                     >
-                        {user ? '✨ 為您推薦' : '✨ 登入以獲推薦'}
+                        {user ? '為您推薦' : '登入以獲推薦'}
                     </button>
                 )}
 
@@ -244,10 +267,13 @@ function Home() {
                             fontWeight: activeTab === 'subscriptions' ? 'bold' : 'normal',
                             color: activeTab === 'subscriptions' ? 'var(--accent)' : 'var(--text-secondary)',
                             borderBottom: activeTab === 'subscriptions' ? '2px solid var(--accent)' : 'none',
-                            paddingBottom: '4px'
+                            paddingBottom: '4px',
+                            flex: 1,
+                            minWidth: 0,
+                            textAlign: 'center'
                         }}
                     >
-                        📺 訂閱內容
+                        訂閱內容
                     </button>
                 )}
 
@@ -258,10 +284,13 @@ function Home() {
                         fontWeight: activeTab === 'trending' ? 'bold' : 'normal',
                         color: activeTab === 'trending' ? 'var(--accent)' : 'var(--text-secondary)',
                         borderBottom: activeTab === 'trending' ? '2px solid var(--accent)' : 'none',
-                        paddingBottom: '4px'
+                        paddingBottom: '4px',
+                        flex: 1,
+                        minWidth: 0,
+                        textAlign: 'center'
                     }}
                 >
-                    🔥 熱門發燒
+                    熱門發燒
                 </button>
 
                 {user && (
@@ -272,10 +301,13 @@ function Home() {
                             fontWeight: activeTab === 'notifications' ? 'bold' : 'normal',
                             color: activeTab === 'notifications' ? 'var(--accent)' : 'var(--text-secondary)',
                             borderBottom: activeTab === 'notifications' ? '2px solid var(--accent)' : 'none',
-                            paddingBottom: '4px'
+                            paddingBottom: '4px',
+                            flex: 1,
+                            minWidth: 0,
+                            textAlign: 'center'
                         }}
                     >
-                        🔔 最新通知
+                        最新通知
                     </button>
                 )}
 

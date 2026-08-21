@@ -35,6 +35,13 @@ async def run_sync_task(user_id: int):
             
             # Fetch new recommendations based on refreshed profile
             await recommendation_service.fetch_recommendations_for_user(db, user_id)
+
+            # Sync changes the source data. Invalidate all per-user feed pages so
+            # the next view cannot serve a pre-sync recommendation snapshot.
+            from services.cache_service import cache_service
+            await cache_service.delete_pattern(f"feed:{user_id}:*")
+            await cache_service.delete_pattern(f"feed:precomputed:{user_id}*")
+            await cache_service.delete(f"subs_feed:{user_id}")
             
             logger.info(f"Background sync finished for user {user_id}")
             
