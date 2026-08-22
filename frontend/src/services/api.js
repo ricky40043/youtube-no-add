@@ -203,6 +203,10 @@ export const feedApi = {
         const response = await api.post('/api/feed/sync')
         return response.data
     },
+    syncStatus: async () => {
+        const response = await api.get('/api/feed/sync/status')
+        return response.data
+    },
     refreshProfile: async () => {
         const response = await api.post('/api/feed/refresh-profile')
         return response.data

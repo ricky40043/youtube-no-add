@@ -16,8 +16,29 @@ from routers.user import get_current_user
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
+# How long a sync-status marker lives in cache. Long enough to outlive a slow
+# sync, short enough that a crashed worker cannot pin the status to "running".
+SYNC_STATUS_TTL = 900
+
+
+def sync_status_key(user_id: int) -> str:
+    """Cache key holding the last known sync state for a user.
+
+    Deliberately NOT matched by the `feed:{user_id}:*` invalidation pattern used
+    for cached feed pages, so clearing the feed cache never wipes the status.
+    """
+    return f"feed:sync_status:{user_id}"
+
+
 async def run_sync_task(user_id: int):
     """Background task to sync uploads for all user subscriptions"""
+    from services.cache_service import cache_service
+
+    await cache_service.set(
+        sync_status_key(user_id),
+        {"status": "running"},
+        ttl=SYNC_STATUS_TTL,
+    )
     async with AsyncSessionLocal() as db:
         try:
             # Get user subscriptions
@@ -38,15 +59,22 @@ async def run_sync_task(user_id: int):
 
             # Sync changes the source data. Invalidate all per-user feed pages so
             # the next view cannot serve a pre-sync recommendation snapshot.
-            from services.cache_service import cache_service
             await cache_service.delete_pattern(f"feed:{user_id}:*")
             await cache_service.delete_pattern(f"feed:precomputed:{user_id}*")
             await cache_service.delete(f"subs_feed:{user_id}")
-            
+
             logger.info(f"Background sync finished for user {user_id}")
-            
+
         except Exception as e:
             logger.error(f"Background sync failed: {e}")
+        finally:
+            # Always publish a terminal state: the client waits on this before
+            # reloading the feed, and must not wait forever on a failed sync.
+            await cache_service.set(
+                sync_status_key(user_id),
+                {"status": "done"},
+                ttl=SYNC_STATUS_TTL,
+            )
 
 @router.get("/")
 async def get_feed(
@@ -226,8 +254,35 @@ async def trigger_sync(
     """
     Manually trigger a sync for all subscriptions.
     """
+    from services.cache_service import cache_service
+
+    # Mark as running before the response is sent. BackgroundTasks only start
+    # after the response, so without this the client could poll the status and
+    # see a stale "done" from a previous sync.
+    await cache_service.set(
+        sync_status_key(current_user.id),
+        {"status": "running"},
+        ttl=SYNC_STATUS_TTL,
+    )
     background_tasks.add_task(run_sync_task, current_user.id)
-    return {"status": "Background sync started"}
+    return {"status": "Background sync started", "sync_status": "running"}
+
+
+@router.get("/sync/status")
+async def get_sync_status(current_user: User = Depends(get_current_user)):
+    """
+    Report whether the background sync for this user is still running.
+
+    The client uses this to reload the feed only once the sync has finished
+    (and therefore once the stale feed cache has been invalidated).
+    """
+    from services.cache_service import cache_service
+
+    state = await cache_service.get(sync_status_key(current_user.id))
+    if not isinstance(state, dict) or state.get("status") not in ("running", "done"):
+        # No marker (never synced, expired, or cache unavailable) -> not running.
+        return {"status": "idle"}
+    return {"status": state["status"]}
 
 @router.post("/precompute")
 async def precompute_feed(
