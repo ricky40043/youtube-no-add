@@ -24,8 +24,9 @@ export const videoApi = {
 
     // Get audio stream URL for background playback
     getAudioUrl: async (videoId) => {
-        const response = await api.get(`/api/video/audio/${encodeURIComponent(videoId)}`)
-        return response.data.url
+        // Keep playback on our origin. The backend resolves a fresh YouTube
+        // URL and proxies byte ranges, avoiding expired/CORS-blocked URLs.
+        return `${API_URL}/api/video/audio/${encodeURIComponent(videoId)}/stream`
     },
 
     // Get stream URL (redirects to actual stream)

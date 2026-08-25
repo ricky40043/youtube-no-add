@@ -269,6 +269,72 @@ async def get_audio_url(video_id: str):
     return {"url": url}
 
 
+@router.get("/audio/{video_id}/stream")
+async def stream_audio(video_id: str, request: Request):
+    """Proxy the current YouTube audio stream to the browser.
+
+    YouTube media URLs are short-lived and direct browser requests can also
+    fail because of CORS or missing byte-range handling.  Resolve a fresh URL
+    for every request and keep the browser on our own origin.
+    """
+    import httpx
+
+    url = await ytdlp_service.get_audio_stream_url(video_id)
+    if not url:
+        info = await invidious_service.get_video_info(video_id)
+        audio_streams = (info or {}).get("streams", [])
+        url = next((s.get("url") for s in audio_streams
+                    if s.get("type") == "audio" and s.get("url")), None)
+
+    if not url:
+        raise HTTPException(status_code=404, detail="Audio stream not found")
+
+    headers = {}
+    if range_header := request.headers.get("range"):
+        headers["Range"] = range_header
+
+    client = httpx.AsyncClient(timeout=None, follow_redirects=True)
+    try:
+        upstream = await client.send(
+            client.build_request("GET", url, headers=headers), stream=True
+        )
+        if upstream.status_code >= 400:
+            await upstream.aclose()
+            await client.aclose()
+            raise HTTPException(status_code=upstream.status_code,
+                                detail="YouTube audio stream unavailable")
+
+        response_headers = {
+            "Accept-Ranges": "bytes",
+            # The signed upstream URL is refreshed per request; never cache
+            # this stable local endpoint with stale media behind it.
+            "Cache-Control": "no-store",
+        }
+        for name in ("content-length", "content-range", "etag", "last-modified"):
+            if value := upstream.headers.get(name):
+                response_headers[name.title()] = value
+
+        async def audio_generator():
+            try:
+                async for chunk in upstream.aiter_bytes(chunk_size=64 * 1024):
+                    yield chunk
+            finally:
+                await upstream.aclose()
+                await client.aclose()
+
+        return StreamingResponse(
+            audio_generator(),
+            status_code=upstream.status_code,
+            media_type=upstream.headers.get("content-type", "audio/mp4"),
+            headers=response_headers,
+        )
+    except HTTPException:
+        raise
+    except Exception:
+        await client.aclose()
+        raise
+
+
 @router.get("/proxy")
 async def proxy_remote_content(url: str):
     """Proxy content to avoid CORS"""
