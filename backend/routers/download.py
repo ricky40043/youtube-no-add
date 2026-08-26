@@ -45,6 +45,7 @@ def _run_download(job_id: str, video_id: str, dl_type: str, title: str):
             output_template = str(DOWNLOADS_DIR / f"{job_id}.%(ext)s")
             cmd = [
                 "yt-dlp",
+                "--js-runtimes", "deno",
                 "-f", "bestaudio/best",
                 "-x", "--audio-format", "mp3",
                 "--no-playlist",
@@ -58,6 +59,7 @@ def _run_download(job_id: str, video_id: str, dl_type: str, title: str):
             output_template = str(DOWNLOADS_DIR / f"{job_id}.%(ext)s")
             cmd = [
                 "yt-dlp",
+                "--js-runtimes", "deno",
                 "-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best",
                 "--merge-output-format", "mp4",
                 "--no-playlist",
