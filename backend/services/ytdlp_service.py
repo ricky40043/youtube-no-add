@@ -21,6 +21,11 @@ class YtDlpService:
             'format': 'best[ext=mp4]/bestvideo[ext=mp4]+bestaudio[ext=m4a]/best',
             'no_playlist': True,
         }
+
+    @staticmethod
+    def _js_runtime_opts() -> Dict[str, Any]:
+        """Enable the JavaScript runtime required by current YouTube."""
+        return {'js_runtimes': {'deno': {}}}
     
     @staticmethod
     def extract_video_id(url_or_id: str) -> str:
@@ -50,6 +55,7 @@ class YtDlpService:
             'format': None,
             'listformats': False,
         }
+        opts.update(self._js_runtime_opts())
         
         # Use cookies if available to unlock 1080p/Premium
         if self.settings.ytdlp_cookies_file and os.path.exists(self.settings.ytdlp_cookies_file):
@@ -289,6 +295,7 @@ class YtDlpService:
             'format': 'bestaudio[ext=m4a]/bestaudio/best',
             'no_playlist': True,
         }
+        opts.update(self._js_runtime_opts())
         
         try:
             loop = asyncio.get_event_loop()
