@@ -27,6 +27,8 @@ function Search() {
     const sentinelRef = useRef(null)
     const queryRef = useRef(query)
     const relatedQueryRef = useRef(query)
+    const streamAbortRef = useRef(null)
+    const searchRequestRef = useRef(0)
 
     // Keep query ref updated
     useEffect(() => {
@@ -92,6 +94,10 @@ function Search() {
 
     // Initial Search
     useEffect(() => {
+        streamAbortRef.current?.abort()
+        const requestId = ++searchRequestRef.current
+        const controller = new AbortController()
+        streamAbortRef.current = controller
         window.scrollTo(0, 0)
         setVideos([])
         setRelatedVideos([])
@@ -110,7 +116,9 @@ function Search() {
                 setError(null)
                 // Progressive search: append five results per batch up to fifty.
                 await searchApi.streamSearch(query, {
+                    signal: controller.signal,
                     onBatch: (batch, meta) => {
+                        if (requestId !== searchRequestRef.current) return
                         setVideos(prev => {
                             const existingIds = new Set(prev.map(v => v.id))
                             return [...prev, ...batch.filter(v => !existingIds.has(v.id))]
@@ -121,6 +129,7 @@ function Search() {
                         }
                     },
                     onComplete: (meta) => {
+                        if (requestId !== searchRequestRef.current) return
                         offsetRef.current = meta.count
                         hasMoreRef.current = false
                         setHasMore(false)
@@ -130,20 +139,25 @@ function Search() {
                 // Fetch related recommendations
                 try {
                     const related = await searchApi.getRelated(query, 10)
+                    if (requestId !== searchRequestRef.current) return
                     setRelatedVideos(related || [])
                     setHasMoreRelated((related || []).length >= 10)
                 } catch (relErr) {
                     console.error('Failed to fetch related:', relErr)
                 }
             } catch (err) {
+                if (err.name === 'AbortError') return
                 console.error('Search failed:', err)
                 setError('搜尋失敗，請稍後再試')
             } finally {
-                isLoadingRef.current = false
-                setLoading(false)
+                if (requestId === searchRequestRef.current) {
+                    isLoadingRef.current = false
+                    setLoading(false)
+                }
             }
         }
         fetchInitial()
+        return () => controller.abort()
     }, [query])
 
     // Update document title
