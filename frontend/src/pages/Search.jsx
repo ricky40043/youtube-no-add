@@ -106,19 +106,26 @@ function Search() {
         const fetchInitial = async () => {
             try {
                 setLoading(true)
+                isLoadingRef.current = true
                 setError(null)
-                // Initial search: limited results for speed
-                const results = await searchApi.search(query, 10, 0)
-                setVideos(results)
-                offsetRef.current = 10
-                if (results.length < 10) {
-                    hasMoreRef.current = false
-                    setHasMore(false)
-                }
-
-                if (results.length > 0 && results[0].thumbnail) {
-                    updateSearchHistoryThumbnail(query, results[0].thumbnail)
-                }
+                // Progressive search: append five results per batch up to fifty.
+                await searchApi.streamSearch(query, {
+                    onBatch: (batch, meta) => {
+                        setVideos(prev => {
+                            const existingIds = new Set(prev.map(v => v.id))
+                            return [...prev, ...batch.filter(v => !existingIds.has(v.id))]
+                        })
+                        offsetRef.current = meta.count
+                        if (offsetRef.current === batch.length && batch[0]?.thumbnail) {
+                            updateSearchHistoryThumbnail(query, batch[0].thumbnail)
+                        }
+                    },
+                    onComplete: (meta) => {
+                        offsetRef.current = meta.count
+                        hasMoreRef.current = false
+                        setHasMore(false)
+                    },
+                })
 
                 // Fetch related recommendations
                 try {
@@ -132,6 +139,7 @@ function Search() {
                 console.error('Search failed:', err)
                 setError('搜尋失敗，請稍後再試')
             } finally {
+                isLoadingRef.current = false
                 setLoading(false)
             }
         }

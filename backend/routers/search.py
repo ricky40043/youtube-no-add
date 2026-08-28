@@ -1,10 +1,86 @@
 from fastapi import APIRouter, Query
+from fastapi.responses import StreamingResponse
+import asyncio
+import json
 from services.ytdlp_service import ytdlp_service
 from services.invidious_service import invidious_service
 from services.cache_service import cache_service
 from config import get_settings
 
 router = APIRouter()
+
+
+def _sse(event: str, payload: dict) -> str:
+    return f"event: {event}\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n"
+
+
+async def _stream_search_batches(q: str, sort: str = "relevance"):
+    """Yield search results in five-item batches, up to fifty items."""
+    settings = get_settings()
+    full_key = f"search:full:{q}:{sort}"
+    cached = await cache_service.get(full_key)
+    accumulated = []
+    seen = set()
+
+    if cached:
+        cached_batch = []
+        for video in cached[:50]:
+            video_id = video.get("id")
+            if video_id and video_id not in seen:
+                seen.add(video_id)
+                accumulated.append(video)
+                cached_batch.append(video)
+                if len(cached_batch) == 5:
+                    yield _sse("batch", {"results": cached_batch, "count": len(accumulated), "done": len(accumulated) >= 50})
+                    cached_batch = []
+        if cached_batch:
+            yield _sse("batch", {"results": cached_batch, "count": len(accumulated), "done": len(accumulated) >= 50})
+        yield _sse("complete", {"count": len(accumulated), "cached": True})
+        return
+
+    backend_offset = 0
+    while len(accumulated) < 50 and backend_offset < 100:
+        fresh_batch = []
+        # A provider can return an overlap at page boundaries. Keep fetching
+        # five-item pages until the client-facing batch really has five new
+        # videos, while still stopping at fifty unique results.
+        while len(fresh_batch) < 5 and backend_offset < 100:
+            batch = await ytdlp_service.search(q, max_results=5, offset=backend_offset, sort=sort)
+            if not batch and backend_offset == 0:
+                batch = await invidious_service.search(q, 5)
+            backend_offset += 5
+            fresh = [video for video in batch if video.get("id") not in seen]
+            for video in fresh:
+                video_id = video.get("id")
+                if video_id:
+                    seen.add(video_id)
+                    fresh_batch.append(video)
+            if not batch:
+                break
+        if not fresh_batch:
+            break
+        fresh_batch = fresh_batch[:50 - len(accumulated)]
+        accumulated.extend(fresh_batch)
+        yield _sse("batch", {"results": fresh_batch, "count": len(accumulated), "done": len(accumulated) >= 50})
+        if len(accumulated) >= 50 or len(fresh_batch) < 5:
+            break
+        await asyncio.sleep(0)
+
+    if accumulated:
+        await cache_service.set(full_key, accumulated[:50], ttl=settings.search_cache_ttl)
+    yield _sse("complete", {"count": len(accumulated), "cached": False})
+
+
+@router.get("/stream")
+async def stream_search_videos(
+    q: str = Query(..., description="搜尋關鍵字"),
+    sort: str = Query("relevance", description="排序: relevance / date / views"),
+):
+    return StreamingResponse(
+        _stream_search_batches(q, sort),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @router.get("")
