@@ -49,7 +49,13 @@ async def _stream_search_batches(q: str, sort: str = "relevance"):
             if not batch and backend_offset == 0:
                 batch = await invidious_service.search(q, 5)
             backend_offset += 5
-            fresh = [video for video in batch if video.get("id") not in seen]
+            fresh = []
+            batch_seen = set()
+            for video in batch:
+                video_id = video.get("id")
+                if video_id and video_id not in seen and video_id not in batch_seen:
+                    batch_seen.add(video_id)
+                    fresh.append(video)
             for video in fresh:
                 video_id = video.get("id")
                 if video_id:
