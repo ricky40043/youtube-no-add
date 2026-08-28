@@ -78,9 +78,13 @@ export const searchApi = {
                 if ((eventLine || '').slice(7) === 'complete') onComplete?.(data)
             }
         }
-        while (true) {
+        let finished = false
+        while (!finished) {
             const { value, done } = await reader.read()
-            if (done) break
+            if (done) {
+                finished = true
+                break
+            }
             consume(value)
         }
         if (buffer.trim()) consume(new Uint8Array())
