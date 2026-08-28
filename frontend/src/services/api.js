@@ -52,6 +52,40 @@ export const searchApi = {
         return response.data.results
     },
 
+    // Progressive search: receive five results at a time, up to fifty.
+    streamSearch: async (query, { onBatch, onComplete, signal } = {}) => {
+        const token = localStorage.getItem('token')
+        const headers = token ? { Authorization: `Bearer ${token}` } : {}
+        const response = await fetch(`${API_URL}/api/search/stream?q=${encodeURIComponent(query)}`, {
+            headers,
+            signal,
+        })
+        if (!response.ok || !response.body) throw new Error(`Search stream failed: ${response.status}`)
+
+        const reader = response.body.getReader()
+        const decoder = new TextDecoder()
+        let buffer = ''
+        const consume = (chunk) => {
+            buffer += decoder.decode(chunk, { stream: true })
+            const frames = buffer.split('\n\n')
+            buffer = frames.pop() || ''
+            for (const frame of frames) {
+                const dataLine = frame.split('\n').find(line => line.startsWith('data: '))
+                const eventLine = frame.split('\n').find(line => line.startsWith('event: '))
+                if (!dataLine) continue
+                const data = JSON.parse(dataLine.slice(6))
+                if ((eventLine || '').slice(7) === 'batch') onBatch?.(data.results || [], data)
+                if ((eventLine || '').slice(7) === 'complete') onComplete?.(data)
+            }
+        }
+        while (true) {
+            const { value, done } = await reader.read()
+            if (done) break
+            consume(value)
+        }
+        if (buffer.trim()) consume(new Uint8Array())
+    },
+
     // Get trending videos
     getTrending: async (region = 'TW') => {
         const response = await api.get('/api/search/trending', {
