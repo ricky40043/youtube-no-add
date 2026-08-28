@@ -56,6 +56,7 @@ async def _stream_search_batches(q: str, sort: str = "relevance"):
                 if video_id and video_id not in seen and video_id not in batch_seen:
                     batch_seen.add(video_id)
                     fresh.append(video)
+            fresh = fresh[:5]
             for video in fresh:
                 video_id = video.get("id")
                 if video_id:
