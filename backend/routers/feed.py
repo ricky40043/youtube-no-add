@@ -5,6 +5,7 @@ from typing import Optional, List
 import base64
 import logging
 import random
+import asyncio
 from datetime import datetime, timedelta
 
 from database.connection import get_db, AsyncSessionLocal
@@ -150,23 +151,26 @@ async def get_feed(
         print(f"[FEED] No personalization signal, using seed queries: {search_queries}")
     print(f"[FEED] Using search queries: {search_queries}")
     
-    # Search for videos based on interests
-    for query in search_queries:
+    # Search all interest queries in parallel; the old sequential loop made
+    # the first recommendation page wait for every query one after another.
+    async def search_one(query):
         try:
-            print(f"[FEED] Searching yt-dlp for: {query}")
             results = await ytdlp_service.search(query, max_results=15)
             print(f"[FEED] yt-dlp returned {len(results)} results for '{query}'")
-            
-            for r in results:
-                vid = r.get('id') or r.get('video_id')
-                if vid and vid not in seen_ids:
-                    seen_ids.add(vid)
-                    all_videos.append(r)
-                    if len(all_videos) >= limit * 10:  # Collect more for pagination
-                        break
+            return results
         except Exception as se:
             print(f"[FEED] yt-dlp search failed for '{query}': {se}")
-        
+            return []
+
+    query_results = await asyncio.gather(*(search_one(query) for query in search_queries))
+    for results in query_results:
+        for r in results:
+            vid = r.get('id') or r.get('video_id')
+            if vid and vid not in seen_ids:
+                seen_ids.add(vid)
+                all_videos.append(r)
+                if len(all_videos) >= limit * 10:
+                    break
         if len(all_videos) >= limit * 10:
             break
 
