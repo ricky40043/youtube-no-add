@@ -438,34 +438,31 @@ function Watch() {
         fetchVideo()
     }, [videoId, useEmbed])
 
-    // Scroll to top when video changes and save to history
-    const prevVideoIdRef = useRef(null)
-    
+    // Only scroll to top when navigating to a DIFFERENT video
+    const prevScrollVideoIdRef = useRef(null)
     useEffect(() => {
-        console.log('[Watch] Video changed, scrolling to top')
-        window.scrollTo(0, 0)
-        
-        // Save current video to history before switching
-        if (prevVideoIdRef.current && prevVideoIdRef.current !== videoId) {
-            setVideoHistory(prev => {
-                // Avoid duplicates - remove if already exists, then add to front
-                const filtered = prev.filter(v => v.id !== prevVideoIdRef.current)
-                const newHistory = [
-                    {
-                        id: prevVideoIdRef.current,
-                        title: videoInfo?.title || '影片',
-                        thumbnail: videoInfo?.thumbnail || ''
-                    },
-                    ...filtered
-                ].slice(0, 50) // Keep max 50 items
-                
-                localStorage.setItem('videoHistory', JSON.stringify(newHistory))
-                console.log('[Watch] Added to history, total:', newHistory.length)
-                return newHistory
-            })
+        if (prevScrollVideoIdRef.current !== videoId) {
+            window.scrollTo(0, 0)
+            prevScrollVideoIdRef.current = videoId
         }
-        
-        prevVideoIdRef.current = videoId
+    }, [videoId])
+
+    // Save video to history when videoInfo is available
+    useEffect(() => {
+        if (!videoId || !videoInfo?.title) return
+        setVideoHistory(prev => {
+            const filtered = prev.filter(v => v.id !== videoId)
+            const newHistory = [
+                {
+                    id: videoId,
+                    title: videoInfo.title,
+                    thumbnail: videoInfo.thumbnail || ''
+                },
+                ...filtered
+            ].slice(0, 50)
+            localStorage.setItem('videoHistory', JSON.stringify(newHistory))
+            return newHistory
+        })
     }, [videoId, videoInfo])
 
     // Stabilize the iframe URL to prevent unnecessary reloads during UI re-renders
