@@ -1458,7 +1458,8 @@ function Watch() {
 
                     .sidebar {
                         width: 100%;
-                        padding: 0 16px;
+                        /* The Watch page's related feed is full-bleed on mobile. */
+                        padding: 0;
                     }
                     
                     .video-container {
@@ -1474,7 +1475,7 @@ function Watch() {
                     }
 
                     .related-videos {
-                        padding: 0 16px;
+                        padding: 0;
                     }
 
                     .related-videos > div:first-child {
@@ -1488,17 +1489,16 @@ function Watch() {
                     }
 
                     .related-videos .video-thumbnail {
-                        /* Match the mobile reference: compact 16:9 preview
-                           with the title/details below it, instead of a
-                           stretched full-width thumbnail. */
-                        width: 160px !important;
-                        height: 90px !important;
+                        /* Related videos on the mobile Watch page are large,
+                           full-width 16:9 cards, like the reference screen. */
+                        width: 100% !important;
+                        height: auto !important;
                         aspect-ratio: 16 / 9;
-                        border-radius: 10px;
+                        border-radius: 0;
                     }
 
                     .related-videos .video-info {
-                        padding: 10px 0 0;
+                        padding: 10px 16px 0;
                     }
 
                     .related-videos .video-title {
