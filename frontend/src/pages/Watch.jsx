@@ -36,9 +36,93 @@ function Watch() {
     const youtubePlayerRef = useRef(null)
     const videoTimeRef = useRef(0)
     const lastVideoIdRef = useRef(null)
+    const [isMiniPlayer, setIsMiniPlayer] = useState(false)
+    const [isPlayerClosed, setIsPlayerClosed] = useState(false)
+    const horizontalTouchRef = useRef({ x: 0, y: 0, active: false })
+    const horizontalBackRef = useRef(false)
     
     // Feature: Hide background playback buttons on desktop
     const isMobile = useIsMobile(1024)
+
+    // Keep horizontal page swipes from being interpreted as browser history
+    // navigation. Player gestures are deliberately excluded: the player owns
+    // seeking, double-tap and long-press interactions.
+    useEffect(() => {
+        const handleTouchStart = (event) => {
+            if (event.target.closest?.('.player-container, .video-container')) return
+            const touch = event.touches[0]
+            horizontalTouchRef.current = { x: touch.clientX, y: touch.clientY, active: true }
+        }
+        const handleTouchMove = (event) => {
+            const start = horizontalTouchRef.current
+            if (!start.active || event.target.closest?.('.player-container, .video-container')) return
+            const touch = event.touches[0]
+            const dx = touch.clientX - start.x
+            const dy = touch.clientY - start.y
+            if (Math.abs(dx) > 24 && Math.abs(dx) > Math.abs(dy) * 1.25) {
+                event.preventDefault()
+                event.stopPropagation()
+            }
+        }
+        const handleTouchEnd = (event) => {
+            const start = horizontalTouchRef.current
+            if (start.active && !event.target.closest?.('.player-container, .video-container')) {
+                const touch = event.changedTouches[0]
+                const dx = touch.clientX - start.x
+                const dy = touch.clientY - start.y
+                if (Math.abs(dx) > 24 && Math.abs(dx) > Math.abs(dy) * 1.25) {
+                    event.preventDefault()
+                    event.stopPropagation()
+                    horizontalBackRef.current = true
+                    window.setTimeout(() => { horizontalBackRef.current = false }, 700)
+                }
+            }
+            horizontalTouchRef.current.active = false
+        }
+        const handlePopState = (event) => {
+            if (!horizontalBackRef.current) return
+            // Safari/Android may dispatch popstate after an edge-swipe even
+            // when the touch event was cancelled. Restore the current entry
+            // and stop the router from navigating away from Watch.
+            event.stopImmediatePropagation?.()
+            horizontalBackRef.current = false
+            window.history.forward()
+        }
+        document.addEventListener('touchstart', handleTouchStart, { passive: true, capture: true })
+        document.addEventListener('touchmove', handleTouchMove, { passive: false, capture: true })
+        document.addEventListener('touchend', handleTouchEnd, { passive: false, capture: true })
+        window.addEventListener('popstate', handlePopState, true)
+        return () => {
+            document.removeEventListener('touchstart', handleTouchStart, true)
+            document.removeEventListener('touchmove', handleTouchMove, true)
+            document.removeEventListener('touchend', handleTouchEnd, true)
+            window.removeEventListener('popstate', handlePopState, true)
+        }
+    }, [])
+
+    useEffect(() => {
+        // A new route always starts as a normal player; this also prevents a
+        // floating player from accidentally showing the previous video's UI.
+        setIsMiniPlayer(false)
+        setIsPlayerClosed(false)
+    }, [videoId])
+
+    const handleToggleMiniPlayer = async () => {
+        if (!isMiniPlayer && !useEmbed) {
+            const video = document.querySelector('.watch-page .player-container video')
+            if (video?.requestPictureInPicture && !document.pictureInPictureElement) {
+                try {
+                    await video.requestPictureInPicture()
+                    setIsMiniPlayer(true)
+                    if (window.history.length > 1) navigate(-1)
+                    return
+                } catch (err) {
+                    console.warn('[Watch] Picture-in-Picture unavailable, using mini player:', err)
+                }
+            }
+        }
+        setIsMiniPlayer(prev => !prev)
+    }
 
     // Feature: Video history stack for "Go Back" functionality
     const [videoHistory, setVideoHistory] = useState(() => {
@@ -747,8 +831,8 @@ function Watch() {
             <div className="watch-container">
                 <div className="main-content">
                     <div className="player-section">
-                        <div
-                            className="video-container"
+                        {!isPlayerClosed && <div
+                            className={`video-container${isMiniPlayer ? ' is-mini-player' : ''}`}
                             style={{
                                 aspectRatio: videoInfo?.width && videoInfo?.height
                                     ? `${videoInfo.width} / ${videoInfo.height}`
@@ -767,6 +851,10 @@ function Watch() {
                                         onError={onPlayerError}
                                         onStateChange={onPlayerStateChange}
                                     />
+                                    <div className="mini-player-controls">
+                                        <button onClick={() => setIsMiniPlayer(prev => !prev)} aria-label={isMiniPlayer ? '恢復播放器' : '縮小到旁邊播放'}>{isMiniPlayer ? '↗' : '▣'}</button>
+                                        {isMiniPlayer && <button onClick={() => { youtubePlayerRef.current?.pauseVideo?.(); setIsPlayerClosed(true); setIsMiniPlayer(false) }} aria-label="關閉播放器">×</button>}
+                                    </div>
 
                                     {/* Smart Error Overlay - ONLY shows when YouTube fails */}
                                     {embedError && (
@@ -835,6 +923,9 @@ function Watch() {
                                             localStorage.setItem('playerMode', 'embed')
                                             setUseEmbed(true)
                                         }}
+                                        isMiniPlayer={isMiniPlayer}
+                                        onToggleMiniPlayer={handleToggleMiniPlayer}
+                                        onCloseMiniPlayer={() => setIsPlayerClosed(true)}
                                         onTimeUpdate={(t) => {
                                             videoTimeRef.current = t
                                             // Feature A: Save progress every 5s (approx throttle)
@@ -846,7 +937,13 @@ function Watch() {
                                     />
                                 </>
                             )}
-                        </div>
+                        </div>}
+
+                        {isPlayerClosed && (
+                            <button className="restore-player-button" onClick={() => setIsPlayerClosed(false)}>
+                                ▶ 恢復播放器
+                            </button>
+                        )}
 
                         {/* YouTube Controls Bar (Below Player) */}
                         {useEmbed && (
