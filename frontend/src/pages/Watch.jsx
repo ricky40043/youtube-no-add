@@ -1448,19 +1448,30 @@ function Watch() {
 
                 @media (max-width: 1024px) {
                     .watch-page {
-                        width: calc(100% + 32px);
-                        margin-left: -16px;
+                        /* Break out of the App <main> padding.  Using the
+                           viewport here is important when the page is opened
+                           inside a narrow/mobile webview: +32px only makes the
+                           player wider than its content box, not full bleed. */
+                        width: 100vw;
+                        max-width: 100vw;
+                        margin-left: calc(50% - 50vw);
+                        overflow-x: clip;
                     }
 
                     .watch-container {
                         flex-direction: column;
                         padding: 0;
                         gap: 0;
-                    }
-
-                    .main-content {
                         width: 100%;
                     }
+
+                    .watch-page > .watch-container > .main-content {
+                        width: 100%;
+                        max-width: none;
+                        padding: 0;
+                    }
+
+                    .player-section { width: 100%; }
 
                     .sidebar {
                         width: 100%;
@@ -1477,7 +1488,7 @@ function Watch() {
                     .video-container.mini-player {
                         width: min(54vw, 280px);
                         right: 10px;
-                        bottom: calc(60px + env(safe-area-inset-bottom, 0px) + 10px);
+                        bottom: calc(60px + env(safe-area-inset-bottom, 0px) + 12px);
                         border-radius: 10px;
                     }
                     
