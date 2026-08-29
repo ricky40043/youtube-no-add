@@ -30,6 +30,7 @@ function VideoPlayer({
     const hlsRef = useRef(null)
     const [isPlaying, setIsPlaying] = useState(false)
     const [currentTime, setCurrentTime] = useState(0)
+    const [seekPreviewTime, setSeekPreviewTime] = useState(null)
     const [duration, setDuration] = useState(0)
     const [volume, setVolume] = useState(1)
     const [volumePreview, setVolumePreview] = useState(1)
@@ -528,8 +529,10 @@ function VideoPlayer({
         onEnded?.()
     }
 
-    // Progress bar
-    const progress = duration > 0 ? (currentTime / duration) * 100 : 0
+    // Progress bar. In audio mode the preview moves during a drag, while the
+    // actual media position is changed only after the finger is released.
+    const displayTime = seekPreviewTime ?? currentTime
+    const progress = duration > 0 ? (displayTime / duration) * 100 : 0
 
     const handleSeek = (e) => {
         e.stopPropagation() // Prevent triggering play/pause
@@ -580,10 +583,18 @@ function VideoPlayer({
         e.stopPropagation() // Prevent bubbling
         const rect = e.currentTarget.getBoundingClientRect()
         const touch = e.touches[0]
+        if (!touch) return
         const percent = Math.max(0, Math.min(1, (touch.clientX - rect.left) / rect.width))
         let newTime = percent * duration
 
         if (!Number.isFinite(newTime)) return
+
+        // Do not seek the remote audio stream on every touchmove. That causes
+        // repeated buffering and visible stutter while dragging.
+        if (useAudioOnly) {
+            setSeekPreviewTime(newTime)
+            return
+        }
 
         const media = useAudioOnly ? audioRef.current : videoRef.current
 
@@ -603,6 +614,16 @@ function VideoPlayer({
             // Normal Seeking (direct proxy with Range support, HLS, etc.)
             media.currentTime = newTime
         }
+    }
+
+    const handleTouchSeekEnd = (e) => {
+        e.stopPropagation()
+        if (seekPreviewTime === null) return
+
+        if (audioRef.current) audioRef.current.currentTime = seekPreviewTime
+        setCurrentTime(seekPreviewTime)
+        onTimeUpdateCallback?.(seekPreviewTime)
+        setSeekPreviewTime(null)
     }
 
     // Fullscreen toggle logic
@@ -1194,7 +1215,8 @@ function VideoPlayer({
                     onClick={handleSeek}
                     onTouchStart={handleTouchSeek}
                     onTouchMove={handleTouchSeek}
-                    onTouchEnd={(e) => e.stopPropagation()}
+                    onTouchEnd={handleTouchSeekEnd}
+                    onTouchCancel={handleTouchSeekEnd}
                 >
                     <div className="progress-bar">
                         <div className="progress-fill" style={{ width: `${progress}%` }} />
@@ -1207,7 +1229,7 @@ function VideoPlayer({
                 </div>
 
                 <span className="time-display">
-                    {formatTime(currentTime)} / {formatTime(duration)}
+                    {formatTime(displayTime)} / {formatTime(duration)}
                 </span>
 
                 {useAudioOnly && (

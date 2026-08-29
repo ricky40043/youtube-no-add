@@ -106,9 +106,18 @@ function BottomNav() {
                     fill: currentColor;
                 }
 
+                /* Fixed line box so the Latin username label and the CJK
+                   labels occupy the same height and stay on one baseline. */
+                .nav-item > span {
+                    line-height: 14px;
+                }
+
                 .nav-avatar {
-                    width: 32px; /* Enlarge Avatar (Red Box) */
-                    height: 32px;
+                    /* Match .nav-item svg size so the profile label lines up
+                       with the other nav labels instead of sitting lower. */
+                    width: 28px;
+                    height: 28px;
+                    flex-shrink: 0;
                     border-radius: 50%;
                     background: var(--accent);
                     color: white;

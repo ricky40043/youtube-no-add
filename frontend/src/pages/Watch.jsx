@@ -130,6 +130,32 @@ function Watch() {
         return saved ? JSON.parse(saved) : []
     })
 
+    // Mobile browser back gesture. Keep it on the page shell so it does not
+    // interfere with the player's timeline/controls.
+    const swipeStartRef = useRef(null)
+    const handleWatchTouchStart = useCallback((event) => {
+        const touch = event.touches[0]
+        if (!touch) return
+        if (event.target.closest?.('.player-controls, button, input, select')) {
+            swipeStartRef.current = null
+            return
+        }
+        swipeStartRef.current = { x: touch.clientX, y: touch.clientY }
+    }, [])
+
+    const handleWatchTouchEnd = useCallback((event) => {
+        const start = swipeStartRef.current
+        swipeStartRef.current = null
+        const touch = event.changedTouches[0]
+        if (!start || !touch || !isMobile) return
+
+        const dx = touch.clientX - start.x
+        const dy = touch.clientY - start.y
+        if (Math.abs(dx) >= 80 && Math.abs(dy) < 60) {
+            navigate(-1)
+        }
+    }, [isMobile, navigate])
+
     const onPlayerReady = (event) => {
         youtubePlayerRef.current = event.target
     }
@@ -804,6 +830,8 @@ function Watch() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             transition={{ duration: 0.3 }}
+            onTouchStart={handleWatchTouchStart}
+            onTouchEnd={handleWatchTouchEnd}
         >
             {/* Full-screen loading overlay only for initial load (no videoInfo yet) */}
             {loading && !videoInfo && (
@@ -1273,7 +1301,7 @@ function Watch() {
                             ) : relatedVideos.length > 0 ? (
                                 <>
                                     {relatedVideos.map(video => (
-                                        <VideoCard key={video.id} video={video} type="horizontal" />
+                                        <VideoCard key={video.id} video={video} type={isMobile ? 'vertical' : 'horizontal'} />
                                     ))}
                                     {/* Load More Related Videos Button */}
                                     {relatedHasMore && !loadingRelated && (
@@ -1351,7 +1379,15 @@ function Watch() {
                     overflow: hidden;
                     max-height: 80vh;
                 }
-                
+
+                .youtube-player-container,
+                .youtube-player-container iframe {
+                    display: block;
+                    width: 100% !important;
+                    height: 100% !important;
+                    border: 0;
+                }
+
                 .video-details {
                     padding: 16px 0;
                 }
@@ -1487,28 +1523,99 @@ function Watch() {
                 }
 
                 @media (max-width: 1024px) {
-                    .watch-container {
-                        flex-direction: column;
-                        padding: 0;
-                        gap: 0;
+                    .watch-page {
+                        /* Break out of the App <main> padding.  Using the
+                           viewport here is important when the page is opened
+                           inside a narrow/mobile webview: +32px only makes the
+                           player wider than its content box, not full bleed. */
+                        width: 100vw;
+                        max-width: 100vw;
+                        margin-left: calc(50% - 50vw);
+                        overflow-x: clip;
                     }
 
-                    .main-content {
+                    .watch-container {
+                        flex-direction: column;
+                        /* Full-size mode keeps a comfortable, centered frame
+                           like the reference UI.  The player is full width of
+                           this content area; mini mode is fixed independently
+                           below and ignores this padding. */
+                        padding: 0;
+                        gap: 0;
                         width: 100%;
+                    }
+
+                    .watch-page > .watch-container > .main-content {
+                        width: 100%;
+                        max-width: none;
+                        padding: 0;
+                    }
+
+                    .player-section {
+                        width: 100%;
+                        padding: 16px 16px 0;
+                        box-sizing: border-box;
                     }
 
                     .sidebar {
                         width: 100%;
-                        padding: 0 16px;
+                        /* The Watch page's related feed is full-bleed on mobile. */
+                        padding: 0;
                     }
                     
                     .video-container {
-                        border-radius: 0;
+                        border-radius: 12px;
                         margin-bottom: 0;
+                        width: 100%;
+                        max-width: none;
                     }
-                    
-                     .video-details {
-                        padding: 12px 16px;
+
+                    .video-details {
+                        padding: 12px 0;
+                    }
+
+                    .related-videos {
+                        padding: 0 16px;
+                    }
+
+                    .related-videos > div:first-child {
+                        padding-left: 0 !important;
+                        padding-right: 0 !important;
+                    }
+
+                    .related-videos .video-card {
+                        margin-bottom: 20px;
+                        width: 100%;
+                    }
+
+                    .related-videos .video-thumbnail {
+                        /* On the Watch page only the main player is full bleed.
+                           Related thumbnails stay as the compact left-aligned
+                           cards shown in the mobile YouTube reference. */
+                        width: 42% !important;
+                        max-width: 360px;
+                        height: auto !important;
+                        aspect-ratio: 16 / 9;
+                        border-radius: 12px;
+                    }
+
+                    .related-videos .video-info {
+                        padding: 10px 0 0;
+                    }
+
+                    .related-videos .video-title {
+                        font-size: 1rem !important;
+                        line-height: 1.45 !important;
+                    }
+
+                    .related-videos .video-author,
+                    .related-videos .video-meta {
+                        font-size: 0.85rem !important;
+                    }
+
+                    /* Leave room for the fixed mobile navigation bar. */
+                    .watch-page {
+                        padding-bottom: 72px;
                     }
                 }
             `}</style>
