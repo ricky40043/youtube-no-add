@@ -1454,7 +1454,11 @@ function Watch() {
                         padding: 0;
                     }
 
-                    .player-section { width: 100%; }
+                    .player-section {
+                        width: 100%;
+                        padding: 16px 16px 0;
+                        box-sizing: border-box;
+                    }
 
                     .sidebar {
                         width: 100%;
@@ -1463,15 +1467,14 @@ function Watch() {
                     }
                     
                     .video-container {
-                        border-radius: 0;
+                        border-radius: 12px;
                         margin-bottom: 0;
                         width: 100%;
                         max-width: none;
-                        border-radius: 0;
                     }
 
                     .video-details {
-                        padding: 12px 16px;
+                        padding: 12px 0;
                     }
 
                     .related-videos {
