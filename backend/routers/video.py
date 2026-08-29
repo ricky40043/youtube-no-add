@@ -356,238 +356,156 @@ async def proxy_remote_content(url: str):
 @router.get("/related/{video_id}")
 async def get_related_videos(video_id: str, offset: int = 0, limit: int = 20):
     """
-    獲取相關影片（多策略並行推薦）
-    
-    策略：Tags、作者名、清洗標題（簡化版）
-    並行搜尋後去重合併，回傳最多 30 部
+    獲取相關影片（基於中文斷詞與語意主題推薦）
     
     - **video_id**: YouTube 影片 ID
     - **offset**: 分頁偏移量
     - **limit**: 每次回傳數量
     """
     import re
-    import time
-    start_time = time.time()
-    print(f"[Related] Request started for {video_id}, offset={offset}, limit={limit}")
-    
-    # Check cache first (cache key includes offset)
-    cache_key = f"related:{video_id}:{offset}:{limit}"
-    cached = await cache_service.get(cache_key)
-    if cached:
-        print(f"[Related] Cache hit for {video_id}")
-        return cached
-    
-    # Check if we have full results cached (for pagination)
+    import jieba
+
     full_cache_key = f"related:{video_id}:full"
     full_cached = await cache_service.get(full_cache_key)
     if full_cached and isinstance(full_cached, list):
-        full_results = full_cached
-        final = full_results[offset:offset + limit]
+        final = full_cached[offset:offset + limit]
         return {
             "items": final,
-            "total": len(full_results),
-            "next_offset": offset + limit if offset + limit < len(full_results) else None
+            "total": len(full_cached),
+            "next_offset": offset + limit if offset + limit < len(full_cached) else None
         }
-    
-    # 1. Get video info
-    t1 = time.time()
+
+    # 1. 取得原影片資訊
     try:
         info = await get_video_info(video_id)
     except Exception:
         raise HTTPException(status_code=404, detail="Original video not found")
-    print(f"[Related] Got video info in {time.time()-t1:.2f}s")
-        
-    title = info.get("title", "")
-    author = info.get("author", "")
+
+    title = (info.get("title") or "").strip()
+    author = (info.get("author") or "").strip()
     channel_id = info.get("channel_id") or info.get("author_id", "")
-    tags = info.get("tags", []) or []
+    tags = [t.strip() for t in (info.get("tags") or []) if t and len(t.strip()) > 1]
     categories = info.get("categories", []) or []
-    
+
     if not title:
         raise HTTPException(status_code=404, detail="Video title not found")
-    
-    # --- Helpers for relevance scoring ---
-    def _tokenize(text):
-        cleaned = re.sub(r'[\[\]【】\(\)『』～~「」《》#|\-_,.!?！？、。:：/]', ' ', (text or '').lower())
-        return set(w for w in cleaned.split() if len(w) > 1)
 
-    # Keyword fingerprint of the original video (title + tags) for relevance matching
-    base_keywords = _tokenize(title) | set(t.lower() for t in tags[:10] if t)
-
-    # --- Build search strategies (all run in parallel) ---
-
-    async def strategy_channel():
-        """策略1: 同頻道其他影片"""
-        if not channel_id:
-            return []
-        try:
-            results = await ytdlp_service.get_channel_latest_videos(channel_id, limit=15)
-            print(f"[Related] Channel strategy: {len(results)} results")
-            return results
-        except Exception as e:
-            print(f"[Related] Channel strategy failed: {e}")
-            return []
-
-    async def strategy_tags():
-        """策略2: 用 Tags 搜尋相似主題"""
-        if not tags:
-            return []
-        try:
-            tag_query = " ".join(tags[:5])
-            results = await ytdlp_service.search(tag_query, max_results=15)
-            print(f"[Related] Tags strategy: {len(results)} results (query: {tag_query[:50]})")
-            return results
-        except Exception as e:
-            print(f"[Related] Tags strategy failed: {e}")
-            return []
-
-    async def strategy_category():
-        """策略3: 分類 + 標題關鍵字"""
-        clean = re.sub(r'[\[\]【】\(\)『』～~「」《》#|\-_]', ' ', title)
-        words = [w for w in clean.split() if len(w) > 1]
-        keywords = " ".join(words[:3])
-        query = f"{categories[0]} {keywords}" if categories else keywords
-        if not query.strip():
-            return []
-        try:
-            results = await ytdlp_service.search(query, max_results=15)
-            print(f"[Related] Category strategy: {len(results)} results (query: {query[:50]})")
-            return results
-        except Exception as e:
-            print(f"[Related] Category strategy failed: {e}")
-            return []
-
-    async def strategy_author():
-        """策略4: 搜尋同作者/YouTuber"""
-        if not author:
-            return []
-        try:
-            results = await ytdlp_service.search(author, max_results=15)
-            print(f"[Related] Author strategy: {len(results)} results (author: {author})")
-            return results
-        except Exception as e:
-            print(f"[Related] Author strategy failed: {e}")
-            return []
-
-    async def strategy_clean_title():
-        """策略5: 清洗標題後搜尋"""
-        clean = re.sub(r'[\[\]【】\(\)『』～~「」《》#|\-_]', ' ', title)
-        words = [w for w in clean.split() if len(w) > 1]
-        if len(words) <= 1:
-            return []
-        query = " ".join(words[:5])
-        try:
-            results = await ytdlp_service.search(query, max_results=15)
-            print(f"[Related] Clean title strategy: {len(results)} results (query: {query[:50]})")
-            return results
-        except Exception as e:
-            print(f"[Related] Clean title strategy failed: {e}")
-            return []
-
-    # 2. Run ALL five strategies in parallel for diverse sources
-    strategy_names = ["channel", "tags", "category", "clean_title", "author"]
-    results = await asyncio.gather(
-        strategy_channel(),
-        strategy_tags(),
-        strategy_category(),
-        strategy_clean_title(),
-        strategy_author(),
-        return_exceptions=True
-    )
-
-    # Small per-strategy bonus so each source contributes, but relevance dominates
-    strategy_bonus = {
-        "channel": 0.15, "tags": 0.20, "category": 0.15,
-        "clean_title": 0.20, "author": 0.10,
+    # 2. 中文智慧分詞與主題關鍵字提取
+    cleaned_title = re.sub(r'[\[\]【】\(\)『』～~「」《》#|\-_,.!?！？、。:：/\s+]', ' ', title).strip()
+    stop_words = {
+        '谁才是', '竟已是', '为什么', '怎么办', '到底', '什么', '如何', '一个', '这是一', 
+        '这个', '那个', '这是', '那些', '有些', '就是', '不是', '其实', '竟然', '原来',
+        '最新消息', '曝光', '盘点', '合集', '真的', '来看', '视频', '解说', '完整版'
     }
+    raw_words = [w.strip() for w in jieba.cut(cleaned_title) if len(w.strip()) > 1]
+    meaningful_words = [w for w in raw_words if w not in stop_words and not w.isdigit()]
 
-    import random
-    # 3. Merge with relevance-first scoring + a cap on same-channel videos
-    seen_ids = {video_id}  # exclude current video
+    if not meaningful_words:
+        meaningful_words = [w for w in raw_words if not w.isdigit()]
+
+    # 建立主題關鍵字指紋
+    base_keywords_set = set(w.lower() for w in meaningful_words) | set(t.lower() for t in tags[:8])
+
+    # 3. 構建並行搜尋策略
+    queries = []
+    # 策略 A: 核心主題詞組 (前 3~4 個詞)
+    if meaningful_words:
+        queries.append(" ".join(meaningful_words[:4]))
+    # 策略 B: 最重要關鍵名詞 (前 2 個詞)
+    if len(meaningful_words) >= 2:
+        queries.append(" ".join(meaningful_words[:2]))
+    # 策略 C: 標題前半部
+    if len(cleaned_title) > 4:
+        queries.append(cleaned_title[:25])
+    # 策略 D: 標籤組
+    if tags:
+        queries.append(" ".join(tags[:3]))
+
+    # 去除重複查詢
+    unique_queries = []
+    seen_q = set()
+    for q in queries:
+        q_clean = q.strip()
+        if q_clean and q_clean not in seen_q:
+            seen_q.add(q_clean)
+            unique_queries.append(q_clean)
+
+    # 並行發起搜尋
+    search_tasks = [ytdlp_service.search(q, max_results=20) for q in unique_queries]
+    raw_results = await asyncio.gather(*search_tasks, return_exceptions=True)
+
+    # 4. 去重與相關度打分 (Relevance Scoring)
+    seen_ids = {video_id}
     merged = []
-    SAME_CHANNEL_MAX = 4  # avoid "整排同一人" domination
     same_channel_count = 0
+    SAME_CHANNEL_MAX = 2  # 同頻道最多只保留 2 部且須具備關聯
 
-    for idx, batch in enumerate(results):
-        if isinstance(batch, Exception):
-            print(f"[Related] Strategy {strategy_names[idx]} raised: {batch}")
-            continue
-        if not isinstance(batch, list):
-            continue
+    def _calc_relevance(cand_title: str) -> float:
+        cleaned = re.sub(r'[\[\]【】\(\)『』～~「」《》#|\-_,.!?！？、。:：/\s+]', ' ', (cand_title or '')).strip()
+        cand_words = set(w.strip().lower() for w in jieba.cut(cleaned) if len(w.strip()) > 1)
+        overlap = len(cand_words & base_keywords_set)
+        return overlap / max(len(base_keywords_set), 1) if base_keywords_set else 0
 
-        strategy_name = strategy_names[idx]
-        bonus = strategy_bonus.get(strategy_name, 0.1)
+    for batch in raw_results:
+        if isinstance(batch, Exception) or not isinstance(batch, list):
+            continue
 
         for video in batch:
             vid = video.get('id')
             if not vid or vid in seen_ids:
                 continue
 
-            # Cap videos from the original channel / same author
+            v_title = video.get('title') or ''
+            relevance = _calc_relevance(v_title)
+
+            # 檢查是否同頻道
             is_same_channel = (
                 (video.get('channel_id') and video.get('channel_id') == channel_id)
                 or (author and video.get('author') == author)
             )
-            if is_same_channel and same_channel_count >= SAME_CHANNEL_MAX:
-                continue
 
-            # Relevance = keyword overlap with the original video (0..1)
-            cand_tokens = _tokenize(video.get('title'))
-            overlap = len(cand_tokens & base_keywords)
-            relevance = overlap / max(len(base_keywords), 1) if base_keywords else 0
+            # 同頻道若無主題關聯性且已超過限制則跳過
+            if is_same_channel:
+                if same_channel_count >= SAME_CHANNEL_MAX or relevance < 0.15:
+                    continue
+                same_channel_count += 1
 
-            # view_count is only a minor tie-breaker, not the dominant factor
             view_count = video.get('view_count') or 0
-            view_bonus = min(view_count / 1_000_000, 1.0) * 0.2
-
-            score = relevance + bonus + view_bonus + random.uniform(-0.03, 0.03)
+            view_bonus = min(view_count / 1_000_000, 1.0) * 0.15
+            score = relevance * 2.0 + view_bonus
 
             seen_ids.add(vid)
-            if is_same_channel:
-                same_channel_count += 1
             video['_score'] = score
             merged.append(video)
 
+    # 依相關度排序
     merged.sort(key=lambda v: -v.get('_score', 0))
 
-    # 4. Pad to a minimum count with trending so the sidebar is never sparse
-    MIN_RESULTS = 12
-    if len(merged) < MIN_RESULTS:
+    # 5. 若結果不足 15 筆，以更廣泛的主題詞搜尋補齊
+    if len(merged) < 15 and meaningful_words:
         try:
-            from services.invidious_service import invidious_service
-            trending = await invidious_service.get_trending('TW')
-            for v in trending:
-                vid = v.get('id')
+            fallback_query = meaningful_words[0]
+            fallback_batch = await ytdlp_service.search(fallback_query, max_results=20)
+            for video in fallback_batch:
+                vid = video.get('id')
                 if vid and vid not in seen_ids:
                     seen_ids.add(vid)
-                    v['_score'] = -1  # keep below genuinely related results
-                    merged.append(v)
-                    if len(merged) >= MIN_RESULTS:
+                    merged.append(video)
+                    if len(merged) >= 25:
                         break
         except Exception as e:
-            print(f"[Related] Trending padding failed: {e}")
+            print(f"[Related] Fallback search failed: {e}")
 
-    # Remove internal fields before returning
+    # 清理內部評分欄位
     for v in merged:
-        v.pop('_source', None)
         v.pop('_score', None)
 
-    # Cache full results for pagination
-    full_results = merged
-    print(f"[Related] Full: {len(full_results)} related videos for {video_id}")
-    
-    # 5. Cache full results for 10 minutes
-    await cache_service.set(f"related:{video_id}:full", full_results, ttl=600)
-    
-    # Return paginated results
-    final = full_results[offset:offset + limit]
-    print(f"[Related] Returning {len(final)} items, offset={offset}")
-    
-    # Cache paginated result too
-    await cache_service.set(cache_key, final, ttl=600)
-    
+    # 寫入快取 10 分鐘
+    await cache_service.set(full_cache_key, merged, ttl=600)
+
+    final = merged[offset:offset + limit]
     return {
         "items": final,
-        "total": len(full_results),
-        "next_offset": offset + limit if offset + limit < len(full_results) else None
+        "total": len(merged),
+        "next_offset": offset + limit if offset + limit < len(merged) else None
     }
