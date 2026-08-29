@@ -1484,11 +1484,15 @@ function Watch() {
 
                     .related-videos .video-card {
                         margin-bottom: 20px;
+                        width: 100%;
                     }
 
                     .related-videos .video-thumbnail {
-                        width: 100% !important;
-                        height: auto !important;
+                        /* Match the mobile reference: compact 16:9 preview
+                           with the title/details below it, instead of a
+                           stretched full-width thumbnail. */
+                        width: 160px !important;
+                        height: 90px !important;
                         aspect-ratio: 16 / 9;
                         border-radius: 10px;
                     }
@@ -1500,6 +1504,16 @@ function Watch() {
                     .related-videos .video-title {
                         font-size: 1rem !important;
                         line-height: 1.45 !important;
+                    }
+
+                    .related-videos .video-author,
+                    .related-videos .video-meta {
+                        font-size: 0.85rem !important;
+                    }
+
+                    /* Leave room for the fixed mobile navigation bar. */
+                    .watch-page {
+                        padding-bottom: 72px;
                     }
                 }
             `}</style>
