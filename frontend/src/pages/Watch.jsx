@@ -45,17 +45,17 @@ function Watch() {
     const isMobile = useIsMobile(1024)
 
     // Keep horizontal page swipes from being interpreted as browser history
-    // navigation. Player gestures are deliberately excluded: the player owns
-    // seeking, double-tap and long-press interactions.
+    // navigation. The progress bar is the one intentional horizontal gesture;
+    // all other Watch-page swipes, including swipes over the video, are locked.
     useEffect(() => {
         const handleTouchStart = (event) => {
-            if (event.target.closest?.('.player-container, .video-container')) return
+            if (event.target.closest?.('.progress-container')) return
             const touch = event.touches[0]
             horizontalTouchRef.current = { x: touch.clientX, y: touch.clientY, active: true }
         }
         const handleTouchMove = (event) => {
             const start = horizontalTouchRef.current
-            if (!start.active || event.target.closest?.('.player-container, .video-container')) return
+            if (!start.active || event.target.closest?.('.progress-container')) return
             const touch = event.touches[0]
             const dx = touch.clientX - start.x
             const dy = touch.clientY - start.y
@@ -66,7 +66,7 @@ function Watch() {
         }
         const handleTouchEnd = (event) => {
             const start = horizontalTouchRef.current
-            if (start.active && !event.target.closest?.('.player-container, .video-container')) {
+            if (start.active && !event.target.closest?.('.progress-container')) {
                 const touch = event.changedTouches[0]
                 const dx = touch.clientX - start.x
                 const dy = touch.clientY - start.y
@@ -107,20 +107,7 @@ function Watch() {
         setIsPlayerClosed(false)
     }, [videoId])
 
-    const handleToggleMiniPlayer = async () => {
-        if (!isMiniPlayer && !useEmbed) {
-            const video = document.querySelector('.watch-page .player-container video')
-            if (video?.requestPictureInPicture && !document.pictureInPictureElement) {
-                try {
-                    await video.requestPictureInPicture()
-                    setIsMiniPlayer(true)
-                    if (window.history.length > 1) navigate(-1)
-                    return
-                } catch (err) {
-                    console.warn('[Watch] Picture-in-Picture unavailable, using mini player:', err)
-                }
-            }
-        }
+    const handleToggleMiniPlayer = () => {
         setIsMiniPlayer(prev => !prev)
     }
 
@@ -830,15 +817,9 @@ function Watch() {
 
             <div className="watch-container">
                 <div className="main-content">
-                    <div className="player-section">
+                        <div className="player-section">
                         {!isPlayerClosed && <div
                             className={`video-container${isMiniPlayer ? ' is-mini-player' : ''}`}
-                            style={{
-                                aspectRatio: videoInfo?.width && videoInfo?.height
-                                    ? `${videoInfo.width} / ${videoInfo.height}`
-                                    : '16 / 9',
-                                position: 'relative'
-                            }}
                         >
                             {useEmbed ? (
                                 <div style={{ position: 'relative', width: '100%', height: '100%' }}>
@@ -852,8 +833,8 @@ function Watch() {
                                         onStateChange={onPlayerStateChange}
                                     />
                                     <div className="mini-player-controls">
-                                        <button onClick={() => setIsMiniPlayer(prev => !prev)} aria-label={isMiniPlayer ? '恢復播放器' : '縮小到旁邊播放'}>{isMiniPlayer ? '↗' : '▣'}</button>
-                                        {isMiniPlayer && <button onClick={() => { youtubePlayerRef.current?.pauseVideo?.(); setIsPlayerClosed(true); setIsMiniPlayer(false) }} aria-label="關閉播放器">×</button>}
+                                        <button className="mini-player-toggle" onClick={() => setIsMiniPlayer(prev => !prev)} title={isMiniPlayer ? '恢復播放器' : '縮小到旁邊播放'} aria-label={isMiniPlayer ? '恢復播放器' : '縮小到旁邊播放'}>{isMiniPlayer ? '↗' : '▣'}</button>
+                                        {isMiniPlayer && <button className="mini-player-close" onClick={() => { youtubePlayerRef.current?.pauseVideo?.(); setIsPlayerClosed(true); setIsMiniPlayer(false) }} title="關閉播放器" aria-label="關閉播放器">×</button>}
                                     </div>
 
                                     {/* Smart Error Overlay - ONLY shows when YouTube fails */}
@@ -925,7 +906,7 @@ function Watch() {
                                         }}
                                         isMiniPlayer={isMiniPlayer}
                                         onToggleMiniPlayer={handleToggleMiniPlayer}
-                                        onCloseMiniPlayer={() => setIsPlayerClosed(true)}
+                                        onCloseMiniPlayer={() => { setIsPlayerClosed(true); setIsMiniPlayer(false) }}
                                         onTimeUpdate={(t) => {
                                             videoTimeRef.current = t
                                             // Feature A: Save progress every 5s (approx throttle)
@@ -940,7 +921,7 @@ function Watch() {
                         </div>}
 
                         {isPlayerClosed && (
-                            <button className="restore-player-button" onClick={() => setIsPlayerClosed(false)}>
+                            <button className="restore-player-button" onClick={() => { setIsPlayerClosed(false); setIsMiniPlayer(false) }}>
                                 ▶ 恢復播放器
                             </button>
                         )}
@@ -1319,6 +1300,9 @@ function Watch() {
                 .watch-page {
                     width: 100%;
                     max-width: 100%;
+                    overflow-x: hidden;
+                    overscroll-behavior-x: none;
+                    touch-action: pan-y;
                 }
                 
                 @keyframes spin {
@@ -1346,6 +1330,7 @@ function Watch() {
 
                 .video-container {
                     width: 100%;
+                    aspect-ratio: 16 / 9;
                     background: #000;
                     border-radius: 12px;
                     overflow: hidden;
@@ -1491,10 +1476,13 @@ function Watch() {
                         flex-direction: column;
                         padding: 0;
                         gap: 0;
+                        width: 100%;
+                        max-width: none;
                     }
 
                     .main-content {
                         width: 100%;
+                        padding: 0;
                     }
 
                     .sidebar {
@@ -1503,6 +1491,9 @@ function Watch() {
                     }
                     
                     .video-container {
+                        width: 100vw;
+                        max-width: 100vw;
+                        margin-left: calc(50% - 50vw);
                         border-radius: 0;
                         margin-bottom: 0;
                     }

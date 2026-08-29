@@ -302,6 +302,24 @@ input {
   /* Ensures video fits within container without cropping */
 }
 
+.watch-page .video-container .player-container,
+.watch-page .video-container .player-wrapper {
+  touch-action: auto;
+}
+
+.watch-page .video-container.is-mini-player {
+  position: fixed;
+  z-index: 1100;
+  right: 12px;
+  bottom: calc(12px + env(safe-area-inset-bottom));
+  width: min(68vw, 360px);
+  height: auto;
+  aspect-ratio: 16 / 9;
+  margin: 0;
+  border-radius: 10px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.65);
+}
+
 /* Watch player layout */
 .mini-player-controls {
   position: absolute;
