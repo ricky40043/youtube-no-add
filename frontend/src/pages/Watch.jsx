@@ -47,6 +47,32 @@ function Watch() {
         return saved ? JSON.parse(saved) : []
     })
 
+    // Mobile browser back gesture. Keep it on the page shell so it does not
+    // interfere with the player's timeline/controls.
+    const swipeStartRef = useRef(null)
+    const handleWatchTouchStart = useCallback((event) => {
+        const touch = event.touches[0]
+        if (!touch) return
+        if (event.target.closest?.('.player-controls, button, input, select')) {
+            swipeStartRef.current = null
+            return
+        }
+        swipeStartRef.current = { x: touch.clientX, y: touch.clientY }
+    }, [])
+
+    const handleWatchTouchEnd = useCallback((event) => {
+        const start = swipeStartRef.current
+        swipeStartRef.current = null
+        const touch = event.changedTouches[0]
+        if (!start || !touch || !isMobile) return
+
+        const dx = touch.clientX - start.x
+        const dy = touch.clientY - start.y
+        if (Math.abs(dx) >= 80 && Math.abs(dy) < 60) {
+            navigate(-1)
+        }
+    }, [isMobile, navigate])
+
     const onPlayerReady = (event) => {
         youtubePlayerRef.current = event.target
     }
@@ -721,6 +747,8 @@ function Watch() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             transition={{ duration: 0.3 }}
+            onTouchStart={handleWatchTouchStart}
+            onTouchEnd={handleWatchTouchEnd}
         >
             {/* Full-screen loading overlay only for initial load (no videoInfo yet) */}
             {loading && !videoInfo && (
@@ -1189,7 +1217,7 @@ function Watch() {
                             ) : relatedVideos.length > 0 ? (
                                 <>
                                     {relatedVideos.map(video => (
-                                        <VideoCard key={video.id} video={video} type="horizontal" />
+                                        <VideoCard key={video.id} video={video} type={isMobile ? 'vertical' : 'horizontal'} />
                                     ))}
                                     {/* Load More Related Videos Button */}
                                     {relatedHasMore && !loadingRelated && (
@@ -1464,7 +1492,7 @@ function Watch() {
                            like the reference UI.  The player is full width of
                            this content area; mini mode is fixed independently
                            below and ignores this padding. */
-                        padding: 0 clamp(16px, 5vw, 44px);
+                        padding: 0;
                         gap: 0;
                         width: 100%;
                     }
@@ -1487,7 +1515,7 @@ function Watch() {
                         margin-bottom: 0;
                         width: 100%;
                         max-width: none;
-                        border-radius: 12px;
+                        border-radius: 0;
                     }
 
                     .video-container.mini-player {
@@ -1498,7 +1526,36 @@ function Watch() {
                     }
                     
                     .video-details {
-                        padding: 12px 0;
+                        padding: 12px 16px;
+                    }
+
+                    .related-videos {
+                        padding: 0 16px;
+                    }
+
+                    .related-videos > div:first-child {
+                        padding-left: 0 !important;
+                        padding-right: 0 !important;
+                    }
+
+                    .related-videos .video-card {
+                        margin-bottom: 20px;
+                    }
+
+                    .related-videos .video-thumbnail {
+                        width: 100% !important;
+                        height: auto !important;
+                        aspect-ratio: 16 / 9;
+                        border-radius: 10px;
+                    }
+
+                    .related-videos .video-info {
+                        padding: 10px 0 0;
+                    }
+
+                    .related-videos .video-title {
+                        font-size: 1rem !important;
+                        line-height: 1.45 !important;
                     }
                 }
             `}</style>
