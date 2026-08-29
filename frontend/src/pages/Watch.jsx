@@ -164,7 +164,13 @@ function Watch() {
                     items = items.filter(item => item && item.id)
                     console.log('[Watch] Valid related videos:', items.length)
                     setRelatedVideos(items)
-                    setRelatedHasMore(false) // No pagination
+                    if (data && typeof data === 'object' && 'next_offset' in data) {
+                        setRelatedHasMore(data.next_offset !== null)
+                        setRelatedOffset(data.next_offset || items.length)
+                    } else {
+                        setRelatedHasMore(items.length >= 20)
+                        setRelatedOffset(items.length)
+                    }
                 })
                 .catch(err => {
                     console.error('[Watch] Failed to load related videos', err)
