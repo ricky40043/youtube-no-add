@@ -33,12 +33,46 @@ function Watch() {
     const [loopMode, setLoopMode] = useState(() => localStorage.getItem('loopMode') === 'true')
     const [embedError, setEmbedError] = useState(false)
     const [savedTime, setSavedTime] = useState(0)
+    const [isMiniPlayer, setIsMiniPlayer] = useState(false)
+    const [miniPlayerDismissed, setMiniPlayerDismissed] = useState(false)
     const youtubePlayerRef = useRef(null)
     const videoTimeRef = useRef(0)
     const lastVideoIdRef = useRef(null)
+    const playerTriggerRef = useRef(null)
     
     // Feature: Hide background playback buttons on desktop
     const isMobile = useIsMobile(1024)
+
+    // Behave like the mobile YouTube player: once the main player has left
+    // the viewport, keep it floating above the related-video feed. Returning
+    // to the player restores it to its original position.
+    useEffect(() => {
+        if (!isMobile) {
+            setIsMiniPlayer(false)
+            return undefined
+        }
+
+        const handlePlayerScroll = () => {
+            const player = playerTriggerRef.current
+            if (!player || miniPlayerDismissed) return
+            if (isMiniPlayer) {
+                if (window.scrollY <= 120) setIsMiniPlayer(false)
+                return
+            }
+            const rect = player.getBoundingClientRect()
+            const shouldMini = rect.bottom < 0 && window.scrollY > 120
+            setIsMiniPlayer(shouldMini)
+        }
+
+        window.addEventListener('scroll', handlePlayerScroll, { passive: true })
+        handlePlayerScroll()
+        return () => window.removeEventListener('scroll', handlePlayerScroll)
+    }, [isMobile, isMiniPlayer, miniPlayerDismissed, videoId])
+
+    useEffect(() => {
+        setIsMiniPlayer(false)
+        setMiniPlayerDismissed(false)
+    }, [videoId])
 
     // Feature: Video history stack for "Go Back" functionality
     const [videoHistory, setVideoHistory] = useState(() => {
@@ -776,7 +810,8 @@ function Watch() {
                 <div className="main-content">
                     <div className="player-section">
                         <div
-                            className="video-container"
+                            ref={playerTriggerRef}
+                            className={`video-container ${isMiniPlayer ? 'is-mini-player' : ''}`}
                             style={{
                                 aspectRatio: videoInfo?.width && videoInfo?.height
                                     ? `${videoInfo.width} / ${videoInfo.height}`
@@ -873,6 +908,28 @@ function Watch() {
                                         }}
                                     />
                                 </>
+                            )}
+                            {isMiniPlayer && (
+                                <div className="mini-player-actions">
+                                    <button
+                                        type="button"
+                                        aria-label="恢復播放器"
+                                        title="恢復播放器"
+                                        onClick={() => {
+                                            setIsMiniPlayer(false)
+                                            window.scrollTo({ top: 0, behavior: 'smooth' })
+                                        }}
+                                    >↗</button>
+                                    <button
+                                        type="button"
+                                        aria-label="關閉縮小播放器"
+                                        title="關閉縮小播放器"
+                                        onClick={() => {
+                                            setIsMiniPlayer(false)
+                                            setMiniPlayerDismissed(true)
+                                        }}
+                                    >×</button>
+                                </div>
                             )}
                         </div>
 
@@ -1471,6 +1528,40 @@ function Watch() {
                         margin-bottom: 0;
                         width: 100%;
                         max-width: none;
+                    }
+
+                    .video-container.is-mini-player {
+                        position: fixed;
+                        z-index: 1200;
+                        right: 12px;
+                        bottom: calc(72px + env(safe-area-inset-bottom) + 12px);
+                        width: min(78vw, 360px);
+                        height: auto !important;
+                        aspect-ratio: 16 / 9 !important;
+                        box-shadow: 0 8px 28px rgba(0, 0, 0, 0.65);
+                        border: 1px solid rgba(255, 255, 255, 0.12);
+                    }
+
+                    .mini-player-actions {
+                        position: absolute;
+                        z-index: 20;
+                        top: 8px;
+                        right: 8px;
+                        display: flex;
+                        gap: 6px;
+                    }
+
+                    .mini-player-actions button {
+                        width: 28px;
+                        height: 28px;
+                        padding: 0;
+                        border: 0;
+                        border-radius: 50%;
+                        background: rgba(0, 0, 0, 0.72);
+                        color: #fff;
+                        font-size: 20px;
+                        line-height: 28px;
+                        cursor: pointer;
                     }
 
                     .video-details {
