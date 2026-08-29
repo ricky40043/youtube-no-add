@@ -1569,7 +1569,10 @@ function Watch() {
                     }
 
                     .related-videos {
-                        padding: 0 16px;
+                        /* Related videos on the Watch page are full bleed on
+                           mobile, matching the YouTube mobile feed. */
+                        width: 100%;
+                        padding: 0;
                     }
 
                     .related-videos > div:first-child {
@@ -1583,18 +1586,17 @@ function Watch() {
                     }
 
                     .related-videos .video-thumbnail {
-                        /* On the Watch page only the main player is full bleed.
-                           Related thumbnails stay as the compact left-aligned
-                           cards shown in the mobile YouTube reference. */
-                        width: 42% !important;
-                        max-width: 360px;
+                        /* The related-video image itself must span the mobile
+                           viewport instead of remaining a compact card. */
+                        width: 100% !important;
+                        max-width: none;
                         height: auto !important;
                         aspect-ratio: 16 / 9;
-                        border-radius: 12px;
+                        border-radius: 0;
                     }
 
                     .related-videos .video-info {
-                        padding: 10px 0 0;
+                        padding: 10px 16px 0;
                     }
 
                     .related-videos .video-title {
