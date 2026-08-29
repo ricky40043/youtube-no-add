@@ -31,6 +31,8 @@ function VideoPlayer({
     const [isPlaying, setIsPlaying] = useState(false)
     const [currentTime, setCurrentTime] = useState(0)
     const [duration, setDuration] = useState(0)
+    const [isSeeking, setIsSeeking] = useState(false)
+    const seekPreviewRef = useRef(0)
     const [volume, setVolume] = useState(1)
     const [volumePreview, setVolumePreview] = useState(1)
     const volumePreviewRef = useRef(1)
@@ -435,8 +437,13 @@ function VideoPlayer({
             return
         }
 
-        setCurrentTime(t)
-        onTimeUpdateCallback?.(t)
+        // While scrubbing, the media element may continue emitting its old
+        // position. Do not let that overwrite the position shown under the
+        // user's finger; the actual seek is committed on pointer release.
+        if (!isSeeking) {
+            setCurrentTime(t)
+            onTimeUpdateCallback?.(t)
+        }
     }
 
     // Duration Persistence
@@ -529,16 +536,18 @@ function VideoPlayer({
     }
 
     // Progress bar
-    const progress = duration > 0 ? (currentTime / duration) * 100 : 0
+    const displayedTime = isSeeking ? seekPreviewRef.current : currentTime
+    const displayedProgress = duration > 0 ? (displayedTime / duration) * 100 : 0
 
-    const handleSeek = (e) => {
-        e.stopPropagation() // Prevent triggering play/pause
-        const rect = e.currentTarget.getBoundingClientRect()
-        const percent = (e.clientX - rect.left) / rect.width
-        let newTime = percent * duration
+    const getSeekTime = (element, clientX) => {
+        const rect = element.getBoundingClientRect()
+        const percent = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width))
+        const newTime = percent * duration
+        return Number.isFinite(newTime) ? newTime : null
+    }
 
-        if (!Number.isFinite(newTime)) return
-
+    const commitSeek = (newTime) => {
+        if (newTime === null) return
         const media = useAudioOnly ? audioRef.current : videoRef.current
 
         // Check if this is a merge proxy (needs &t= reload for seeking)
@@ -552,7 +561,7 @@ function VideoPlayer({
             let baseUrl = currentUrl.split('&t=')[0]
             videoRef.current.src = `${baseUrl}&t=${newTime}`
             videoRef.current.play().catch(e => { if (e.name !== 'NotAllowedError') console.error(e) })
-            setCurrentTime(newTime) // Update UI immediately
+            setCurrentTime(newTime)
         } else if (media) {
             // Normal Seeking (direct proxy with Range support, HLS, etc.)
             media.currentTime = newTime
@@ -575,34 +584,42 @@ function VideoPlayer({
         }
     }
 
-    // Touch seeking logic
-    const handleTouchSeek = (e) => {
-        e.stopPropagation() // Prevent bubbling
-        const rect = e.currentTarget.getBoundingClientRect()
-        const touch = e.touches[0]
-        const percent = Math.max(0, Math.min(1, (touch.clientX - rect.left) / rect.width))
-        let newTime = percent * duration
+    const previewSeek = (e) => {
+        const newTime = getSeekTime(e.currentTarget, e.clientX)
+        if (newTime === null) return
+        seekPreviewRef.current = newTime
+        setCurrentTime(newTime)
+    }
 
-        if (!Number.isFinite(newTime)) return
+    const handleSeekStart = (e) => {
+        e.stopPropagation()
+        e.preventDefault()
+        e.currentTarget.setPointerCapture?.(e.pointerId)
+        setIsSeeking(true)
+        previewSeek(e)
+    }
 
-        const media = useAudioOnly ? audioRef.current : videoRef.current
+    const handleSeekMove = (e) => {
+        if (!isSeeking) return
+        e.stopPropagation()
+        e.preventDefault()
+        previewSeek(e)
+    }
 
-        // Check if this is a merge proxy (needs &t= reload for seeking)
-        const currentStream = getSelectedStream()
-        const isMergeProxy = currentStream?.proxy_type === 'merge'
+    const handleSeekEnd = (e) => {
+        if (!isSeeking) return
+        e.stopPropagation()
+        e.preventDefault()
+        commitSeek(seekPreviewRef.current)
+        setIsSeeking(false)
+    }
 
-        if (isMergeProxy && videoRef.current) {
-            // Merge Proxy Seeking: Reload Video with &t=
-            setStartTimeOffset(newTime)
-            let currentUrl = currentStream.url
-            let baseUrl = currentUrl.split('&t=')[0]
-            videoRef.current.src = `${baseUrl}&t=${newTime}`
-            videoRef.current.play().catch(e => { if (e.name !== 'NotAllowedError') console.error(e) })
-            setCurrentTime(newTime)
-        } else if (media) {
-            // Normal Seeking (direct proxy with Range support, HLS, etc.)
-            media.currentTime = newTime
-        }
+    const handleSeekCancel = (e) => {
+        if (!isSeeking) return
+        e.stopPropagation()
+        e.currentTarget.releasePointerCapture?.(e.pointerId)
+        setCurrentTime(videoRef.current?.currentTime ?? audioRef.current?.currentTime ?? currentTime)
+        setIsSeeking(false)
     }
 
     // Fullscreen toggle logic
@@ -1191,23 +1208,23 @@ function VideoPlayer({
 
                 <div
                     className="progress-container"
-                    onClick={handleSeek}
-                    onTouchStart={handleTouchSeek}
-                    onTouchMove={handleTouchSeek}
-                    onTouchEnd={(e) => e.stopPropagation()}
+                    onPointerDown={handleSeekStart}
+                    onPointerMove={handleSeekMove}
+                    onPointerUp={handleSeekEnd}
+                    onPointerCancel={handleSeekCancel}
                 >
                     <div className="progress-bar">
-                        <div className="progress-fill" style={{ width: `${progress}%` }} />
+                        <div className="progress-fill" style={{ width: `${displayedProgress}%` }} />
                     </div>
                     {/* Knob lives in the container (not inside the overflow:hidden bar)
                         so it renders as one full circle instead of a clipped sliver */}
-                    <div className="progress-handle" style={{ left: `${progress}%` }} />
+                    <div className="progress-handle" style={{ left: `${displayedProgress}%` }} />
                     {/* Hit area visualizer/expander */}
                     <div className="progress-hit-area" />
                 </div>
 
                 <span className="time-display">
-                    {formatTime(currentTime)} / {formatTime(duration)}
+                    {formatTime(isSeeking ? seekPreviewRef.current : currentTime)} / {formatTime(duration)}
                 </span>
 
                 {useAudioOnly && (
@@ -1228,9 +1245,6 @@ function VideoPlayer({
                     </label>
                 )}
 
-                {/* Settings / Switch / Fullscreen — hidden in 音樂模式 to keep the bar minimal (timeline + time + loop only) */}
-                {!useAudioOnly && (
-                  <>
                 {onToggleMiniPlayer && (
                     <button
                         className="control-button mini-toggle-button"
@@ -1239,6 +1253,10 @@ function VideoPlayer({
                         aria-label={isMiniPlayer ? '恢復播放器' : '縮小到旁邊播放'}
                     >{isMiniPlayer ? '↗' : '▣'}</button>
                 )}
+
+                {/* Settings / Switch / Fullscreen — hidden in 音樂模式 to keep the bar minimal */}
+                {!useAudioOnly && (
+                  <>
                 {/* Settings Button */}
                 <button
                     className="control-button"
