@@ -32,6 +32,7 @@ function Watch() {
     const [useEmbed, setUseEmbed] = useState(() => localStorage.getItem('playerMode') !== 'proxy')
     const [loopMode, setLoopMode] = useState(() => localStorage.getItem('loopMode') === 'true')
     const [embedError, setEmbedError] = useState(false)
+    const [isMiniPlayer, setIsMiniPlayer] = useState(false)
     const [savedTime, setSavedTime] = useState(0)
     const youtubePlayerRef = useRef(null)
     const videoTimeRef = useRef(0)
@@ -748,7 +749,7 @@ function Watch() {
                 <div className="main-content">
                     <div className="player-section">
                         <div
-                            className="video-container"
+                            className={`video-container${isMiniPlayer ? ' mini-player' : ''}`}
                             style={{
                                 aspectRatio: videoInfo?.width && videoInfo?.height
                                     ? `${videoInfo.width} / ${videoInfo.height}`
@@ -756,6 +757,18 @@ function Watch() {
                                 position: 'relative'
                             }}
                         >
+                            <button
+                                type="button"
+                                className="player-size-button"
+                                onClick={(event) => {
+                                    event.stopPropagation()
+                                    setIsMiniPlayer((mini) => !mini)
+                                }}
+                                aria-label={isMiniPlayer ? '恢復滿版播放器' : '縮小播放器'}
+                                title={isMiniPlayer ? '恢復滿版' : '縮小播放器'}
+                            >
+                                {isMiniPlayer ? '↗' : '⌟'}
+                            </button>
                             {useEmbed ? (
                                 <div style={{ position: 'relative', width: '100%', height: '100%' }}>
                                     <YouTube
@@ -1254,6 +1267,50 @@ function Watch() {
                     overflow: hidden;
                     max-height: 80vh;
                 }
+
+                .player-size-button {
+                    position: absolute;
+                    top: 10px;
+                    right: 10px;
+                    z-index: 60;
+                    width: 34px;
+                    height: 34px;
+                    border-radius: 50%;
+                    background: rgba(0, 0, 0, 0.72);
+                    color: #fff;
+                    font-size: 22px;
+                    line-height: 1;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    cursor: pointer;
+                }
+
+                .player-size-button:hover {
+                    background: rgba(40, 40, 40, 0.95);
+                }
+
+                .youtube-player-container,
+                .youtube-player-container iframe {
+                    display: block;
+                    width: 100% !important;
+                    height: 100% !important;
+                    border: 0;
+                }
+
+                .mini-player {
+                    position: fixed;
+                    z-index: 1100;
+                    right: 12px;
+                    bottom: 16px;
+                    width: min(360px, 42vw);
+                    height: auto;
+                    aspect-ratio: 16 / 9;
+                    max-height: none;
+                    border-radius: 10px;
+                    box-shadow: 0 8px 28px rgba(0, 0, 0, 0.65);
+                    border: 1px solid rgba(255, 255, 255, 0.18);
+                }
                 
                 .video-details {
                     padding: 16px 0;
@@ -1390,6 +1447,11 @@ function Watch() {
                 }
 
                 @media (max-width: 1024px) {
+                    .watch-page {
+                        width: calc(100% + 32px);
+                        margin-left: -16px;
+                    }
+
                     .watch-container {
                         flex-direction: column;
                         padding: 0;
@@ -1408,6 +1470,15 @@ function Watch() {
                     .video-container {
                         border-radius: 0;
                         margin-bottom: 0;
+                        width: 100vw;
+                        max-width: 100vw;
+                    }
+
+                    .video-container.mini-player {
+                        width: min(54vw, 280px);
+                        right: 10px;
+                        bottom: calc(60px + env(safe-area-inset-bottom, 0px) + 10px);
+                        border-radius: 10px;
                     }
                     
                      .video-details {
