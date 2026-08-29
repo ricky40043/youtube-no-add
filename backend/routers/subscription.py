@@ -100,8 +100,10 @@ async def subscribe_channel(
     await db.commit()
     await db.refresh(new_sub)
 
-    # Invalidate cached subscription feed so the new channel shows up immediately
+    # Invalidate cached subscription feed + notifications so the new channel
+    # shows up immediately instead of after the 10 minute TTL
     await cache_service.delete(f"subs_feed:{current_user.id}")
+    await cache_service.delete(f"subs_notifications:{current_user.id}")
 
     # Trigger background sync for this channel immediately
     background_tasks.add_task(sync_new_channel, sub_data.channel_id)
@@ -138,6 +140,7 @@ async def unsubscribe_channel(
     )
     await db.commit()
     await cache_service.delete(f"subs_feed:{current_user.id}")
+    await cache_service.delete(f"subs_notifications:{current_user.id}")
     return {"message": "Unsubscribed"}
 
 @router.get("/feed", response_model=List[VideoFeedItem])
@@ -220,6 +223,8 @@ async def toggle_notification(
         sub.notify_enabled = not sub.notify_enabled
         
     await db.commit()
+    # Channel set for the notifications tab changed -> drop its cached page
+    await cache_service.delete(f"subs_notifications:{current_user.id}")
     return {"message": "Notification updated", "notify_enabled": sub.notify_enabled}
 
 @router.get("/notifications", response_model=List[VideoFeedItem])

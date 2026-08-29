@@ -19,6 +19,7 @@ function Home() {
     const hasMoreRef = useRef(true)
     const isLoadingRef = useRef(false)
     const viewRequestRef = useRef(0)
+    const activeTabRef = useRef(activeTab)
     const observerRef = useRef(null)
     const sentinelRef = useRef(null)
     const fetchFeedRef = useRef(null)
@@ -26,6 +27,13 @@ function Home() {
     // Stable fetchFeed with useCallback
     const fetchFeed = useCallback(async (init = false) => {
         console.log('[Home] fetchFeed CLICKED, init:', init, 'cursor:', cursorRef.current)
+        // The recommendation feed may blend in trending videos, so it must never
+        // write into another tab's list (e.g. a delayed post-sync refresh landing
+        // after the user switched to 訂閱內容).
+        if (activeTabRef.current !== 'recommended') {
+            console.log('[Home] Not on recommended tab, skip feed fetch')
+            return
+        }
         if (isLoadingRef.current) {
             console.log('[Home] Already loading, skip')
             return
@@ -140,6 +148,7 @@ function Home() {
 
     // Initial load when tab changes
     useEffect(() => {
+        activeTabRef.current = activeTab
         viewRequestRef.current += 1
         isLoadingRef.current = false
         window.scrollTo(0, 0)
@@ -170,24 +179,60 @@ function Home() {
         return () => window.removeEventListener('notification-change', handleNotifyChange)
     }, [activeTab, user, fetchNotifications])
 
-    // Auto-sync on mount
+    // Auto-sync on mount: trigger the background sync, then reload the feed only
+    // once the sync has actually finished (that is when the server drops the
+    // stale feed cache). Refreshing after a fixed delay used to either show
+    // pre-sync data or, if the user had switched tabs meanwhile, append
+    // recommendation/trending videos to the tab they were now looking at.
     useEffect(() => {
-        if (user && activeTab === 'recommended') {
-            const autoSync = async () => {
-                try {
-                    setSyncing(true)
-                    await feedApi.sync()
-                    setTimeout(() => {
-                        if (activeTab === 'recommended') fetchFeed(false)
-                    }, 1000)
-                } catch (e) {
-                    console.error("Auto sync failed:", e)
-                } finally {
-                    setSyncing(false)
+        if (!user || activeTab !== 'recommended') return
+
+        let cancelled = false
+        const requestId = viewRequestRef.current
+        const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms))
+        const stillCurrent = () => !cancelled && requestId === viewRequestRef.current
+
+        const autoSync = async () => {
+            try {
+                setSyncing(true)
+                await feedApi.sync()
+
+                // Poll for completion (max ~45s) instead of guessing a delay.
+                for (let i = 0; i < 30; i++) {
+                    await sleep(1500)
+                    if (!stillCurrent()) return
+                    let status = 'idle'
+                    try {
+                        const res = await feedApi.syncStatus()
+                        status = res?.status || 'idle'
+                    } catch (e) {
+                        console.error('Sync status check failed:', e)
+                        return
+                    }
+                    if (!stillCurrent()) return
+                    if (status !== 'running') break
                 }
+
+                // Let the initial load settle; fetchFeed ignores overlapping calls.
+                for (let i = 0; i < 10 && isLoadingRef.current; i++) {
+                    await sleep(1000)
+                    if (!stillCurrent()) return
+                }
+                if (!stillCurrent() || isLoadingRef.current) return
+                // Only replace the list while the user is still on the first
+                // page; refreshing after they paginated would throw away what
+                // they already scrolled through.
+                const paged = parseInt(cursorRef.current) > 1
+                if (!paged) fetchFeed(true)
+            } catch (e) {
+                console.error("Auto sync failed:", e)
+            } finally {
+                if (!cancelled) setSyncing(false)
             }
-            autoSync()
         }
+        autoSync()
+
+        return () => { cancelled = true }
     }, [user, activeTab, fetchFeed])
 
     // Stable Observer for infinite scroll (sentinel-based)
