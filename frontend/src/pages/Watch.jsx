@@ -1475,7 +1475,7 @@ function Watch() {
                     }
 
                     .related-videos {
-                        padding: 0;
+                        padding: 0 16px;
                     }
 
                     .related-videos > div:first-child {
@@ -1489,16 +1489,18 @@ function Watch() {
                     }
 
                     .related-videos .video-thumbnail {
-                        /* Related videos on the mobile Watch page are large,
-                           full-width 16:9 cards, like the reference screen. */
-                        width: 100% !important;
+                        /* On the Watch page only the main player is full bleed.
+                           Related thumbnails stay as the compact left-aligned
+                           cards shown in the mobile YouTube reference. */
+                        width: 42% !important;
+                        max-width: 360px;
                         height: auto !important;
                         aspect-ratio: 16 / 9;
-                        border-radius: 0;
+                        border-radius: 12px;
                     }
 
                     .related-videos .video-info {
-                        padding: 10px 16px 0;
+                        padding: 10px 0 0;
                     }
 
                     .related-videos .video-title {
