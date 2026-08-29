@@ -1460,7 +1460,11 @@ function Watch() {
 
                     .watch-container {
                         flex-direction: column;
-                        padding: 0;
+                        /* Full-size mode keeps a comfortable, centered frame
+                           like the reference UI.  The player is full width of
+                           this content area; mini mode is fixed independently
+                           below and ignores this padding. */
+                        padding: 0 clamp(16px, 5vw, 44px);
                         gap: 0;
                         width: 100%;
                     }
@@ -1481,8 +1485,9 @@ function Watch() {
                     .video-container {
                         border-radius: 0;
                         margin-bottom: 0;
-                        width: 100vw;
-                        max-width: 100vw;
+                        width: 100%;
+                        max-width: none;
+                        border-radius: 12px;
                     }
 
                     .video-container.mini-player {
@@ -1492,8 +1497,8 @@ function Watch() {
                         border-radius: 10px;
                     }
                     
-                     .video-details {
-                        padding: 12px 16px;
+                    .video-details {
+                        padding: 12px 0;
                     }
                 }
             `}</style>
