@@ -35,6 +35,8 @@ function Watch() {
     const [savedTime, setSavedTime] = useState(0)
     const youtubePlayerRef = useRef(null)
     const videoTimeRef = useRef(0)
+    const lastVideoIdRef = useRef(null)
+    const isMobile = useIsMobile(1024)
     // Feature: Video history stack for "Go Back" functionality
     const [videoHistory, setVideoHistory] = useState(() => {
         const saved = localStorage.getItem('videoHistory')
