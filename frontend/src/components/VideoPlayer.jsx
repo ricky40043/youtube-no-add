@@ -20,10 +20,7 @@ function VideoPlayer({
     isShuffle = false,
     onNext,
     onPrev,
-    loopMode = false,
-    isMiniPlayer = false,
-    onToggleMiniPlayer,
-    onCloseMiniPlayer
+    loopMode = false
 }) {
     const videoRef = useRef(null)
     const audioRef = useRef(null)
@@ -34,8 +31,6 @@ function VideoPlayer({
     const [isSeeking, setIsSeeking] = useState(false)
     const seekPreviewRef = useRef(0)
     const [volume, setVolume] = useState(1)
-    const [volumePreview, setVolumePreview] = useState(1)
-    const volumePreviewRef = useRef(1)
     const [muted, setMuted] = useState(false)
     const [playbackRate, setPlaybackRate] = useState(1.0)
     const [quality, setQuality] = useState('Auto')
@@ -51,23 +46,6 @@ function VideoPlayer({
 
     // Combine manual preference and auto-detection
     const useAudioOnly = backgroundMode || autoAudioOnly || !!externalAudioRef
-
-    const applyVolume = useCallback((nextVolume) => {
-        const next = Math.max(0, Math.min(1, Number(nextVolume)))
-        setVolume(next)
-        setVolumePreview(next)
-        volumePreviewRef.current = next
-        if (videoRef.current) videoRef.current.volume = next
-        if (audioRef.current) audioRef.current.volume = next
-    }, [])
-
-    const previewVolume = (nextVolume) => {
-        const next = Math.max(0, Math.min(1, Number(nextVolume)))
-        setVolumePreview(next)
-        volumePreviewRef.current = next
-    }
-
-    const commitVolume = () => applyVolume(volumePreviewRef.current)
 
     useEffect(() => {
         if (videoRef.current) videoRef.current.volume = volume
@@ -1227,33 +1205,6 @@ function VideoPlayer({
                     {formatTime(isSeeking ? seekPreviewRef.current : currentTime)} / {formatTime(duration)}
                 </span>
 
-                {useAudioOnly && (
-                    <label className="volume-control" title="音量">
-                        <span aria-hidden="true">🔊</span>
-                        <input
-                            type="range"
-                            min="0"
-                            max="1"
-                            step="0.01"
-                            value={volumePreview}
-                            onChange={(e) => previewVolume(e.target.value)}
-                            onPointerUp={commitVolume}
-                            onPointerCancel={commitVolume}
-                            onTouchEnd={commitVolume}
-                            aria-label="音量"
-                        />
-                    </label>
-                )}
-
-                {onToggleMiniPlayer && (
-                    <button
-                        className="control-button mini-toggle-button"
-                        onClick={(e) => { e.stopPropagation(); onToggleMiniPlayer() }}
-                        title={isMiniPlayer ? '恢復播放器' : '縮小到旁邊播放'}
-                        aria-label={isMiniPlayer ? '恢復播放器' : '縮小到旁邊播放'}
-                    >{isMiniPlayer ? '↗' : '▣'}</button>
-                )}
-
                 {/* Settings / Switch / Fullscreen — hidden in 音樂模式 to keep the bar minimal */}
                 {!useAudioOnly && (
                   <>
@@ -1319,14 +1270,6 @@ function VideoPlayer({
                     )}
                 </button>
                 </>
-                )}
-                {isMiniPlayer && onCloseMiniPlayer && (
-                    <button
-                        className="control-button mini-close-button"
-                        onClick={(e) => { e.stopPropagation(); onCloseMiniPlayer() }}
-                        title="關閉播放器"
-                        aria-label="關閉播放器"
-                    >×</button>
                 )}
             </div>
 
