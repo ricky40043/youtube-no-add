@@ -1152,7 +1152,7 @@ function Watch() {
                             <div style={{ padding: '12px 16px 8px' }}>
                                 <span style={{ fontSize: '0.95rem', fontWeight: '600' }}>相關影片</span>
                             </div>
-                            {loadingRelated ? (
+                            {loadingRelated && relatedVideos.length === 0 ? (
                                 <div style={{ padding: '40px 20px', textAlign: 'center', color: '#aaa' }}>
                                     <div className="loading-spinner" style={{
                                         margin: '0 auto 12px',
@@ -1167,43 +1167,44 @@ function Watch() {
                                 </div>
                             ) : relatedVideos.length > 0 ? (
                                 <>
-                                    {relatedVideos.map(video => (
-                                        <VideoCard key={video.id} video={video} type="horizontal" />
+                                    {relatedVideos.map((video, idx) => (
+                                        <VideoCard key={video.id ? `${video.id}_${idx}` : idx} video={video} type="horizontal" />
                                     ))}
                                     {/* Load More Related Videos Button */}
-                                    {relatedHasMore && !loadingRelated && (
-                                        <button 
-                                            onClick={loadMoreRelatedVideos}
-                                            style={{ 
-                                                display: 'block', 
-                                                margin: '16px auto', 
-                                                padding: '10px 20px',
-                                                background: 'var(--accent)',
-                                                color: 'white',
-                                                border: 'none',
-                                                borderRadius: '20px',
-                                                cursor: 'pointer',
-                                                fontSize: '13px'
-                                            }}
-                                        >
-                                            載入更多相關影片
-                                        </button>
+                                    {relatedHasMore && (
+                                        <div style={{ padding: '16px', textAlign: 'center' }}>
+                                            <button 
+                                                type="button"
+                                                onClick={(e) => { e.preventDefault(); e.stopPropagation(); loadMoreRelatedVideos() }}
+                                                disabled={loadingRelated}
+                                                style={{ 
+                                                    display: 'inline-block', 
+                                                    padding: '10px 24px',
+                                                    background: loadingRelated ? '#333' : 'var(--accent)',
+                                                    color: 'white',
+                                                    border: 'none',
+                                                    borderRadius: '20px',
+                                                    cursor: loadingRelated ? 'not-allowed' : 'pointer',
+                                                    fontSize: '13px',
+                                                    opacity: loadingRelated ? 0.7 : 1,
+                                                    transition: 'background 0.2s'
+                                                }}
+                                            >
+                                                {loadingRelated ? '載入更多相關影片中...' : '載入更多相關影片'}
+                                            </button>
+                                        </div>
                                     )}
 
-                                    {!relatedHasMore && relatedVideos.length > 0 && !loadingRelated && (
+                                    {!relatedHasMore && !loadingRelated && (
                                         <div style={{ textAlign: 'center', padding: '16px', color: '#666', fontSize: '13px' }}>
                                             沒有更多相關影片了
                                         </div>
                                     )}
                                 </>
                             ) : (
-                                <>
-                                    {!loadingRelated && (
-                                        <div style={{ padding: '60px 20px', textAlign: 'center', color: '#666', fontSize: '0.9rem' }}>
-                                            暫無相關影片
-                                        </div>
-                                    )}
-                                </>
+                                <div style={{ padding: '60px 20px', textAlign: 'center', color: '#666', fontSize: '0.9rem' }}>
+                                    暫無相關影片
+                                </div>
                             )}
                         </div>
                     )}
