@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { motion } from 'framer-motion'
 import VideoCard from '../components/VideoCard'
-import { searchApi, feedApi, authApi, subscriptionApi } from '../services/api'
+import { feedApi, authApi, subscriptionApi } from '../services/api'
 
 function Home() {
     const [videos, setVideos] = useState([])
@@ -9,9 +9,8 @@ function Home() {
     const [error, setError] = useState(null)
     const [user] = useState(authApi.getCurrentUser())
 
-    // 'recommended' | 'subscriptions' | 'trending' | 'notifications'
-    const [activeTab, setActiveTab] = useState(user ? 'recommended' : 'trending')
-    const [syncing, setSyncing] = useState(false)
+    // 'recommended' | 'subscriptions'
+    const [activeTab, setActiveTab] = useState('recommended')
     const [hasMore, setHasMore] = useState(true)
 
     // Refs for stable infinite scroll (avoid stale closure)
@@ -21,12 +20,12 @@ function Home() {
     const viewRequestRef = useRef(0)
     const observerRef = useRef(null)
     const sentinelRef = useRef(null)
-    const fetchFeedRef = useRef(null)
+    const syncRequestedRef = useRef(false)
 
     // Stable fetchFeed with useCallback
     const fetchFeed = useCallback(async (init = false) => {
         console.log('[Home] fetchFeed CLICKED, init:', init, 'cursor:', cursorRef.current)
-        if (isLoadingRef.current) {
+        if (isLoadingRef.current || (!init && !hasMoreRef.current)) {
             console.log('[Home] Already loading, skip')
             return
         }
@@ -48,12 +47,15 @@ function Home() {
             if (init) {
                 setVideos(data.items || [])
             } else {
-                setVideos(prev => [...prev, ...(data.items || [])])
+                setVideos(prev => {
+                    const seen = new Set(prev.map(video => video.id))
+                    return [...prev, ...(data.items || []).filter(video => !seen.has(video.id))]
+                })
             }
 
             // Check if there are more items to load
             const hasItems = data.items && data.items.length > 0
-            const nextPage = data.next_cursor || (hasItems ? String((parseInt(cursorRef.current) || 0) + 1) : null)
+            const nextPage = data.next_cursor || null
             cursorRef.current = nextPage
             hasMoreRef.current = hasItems && !!data.next_cursor
             setHasMore(hasItems && !!data.next_cursor)
@@ -61,29 +63,6 @@ function Home() {
         } catch (err) {
             console.error('[Home] Error:', err)
             setError('無法載入更多推薦，請稍後再試')
-        } finally {
-            if (requestId === viewRequestRef.current) {
-                isLoadingRef.current = false
-                setLoading(false)
-            }
-        }
-    }, [])
-
-    // Fetch Trending
-    const fetchTrending = useCallback(async () => {
-        isLoadingRef.current = true
-        setLoading(true)
-        setError(null)
-        const requestId = viewRequestRef.current
-        try {
-            const results = await searchApi.getTrending('TW')
-            if (requestId !== viewRequestRef.current) return
-            setVideos(results)
-            hasMoreRef.current = false
-            setHasMore(false)
-        } catch (err) {
-            console.error('Failed to fetch trending:', err)
-            setError('無法載入熱門影片')
         } finally {
             if (requestId === viewRequestRef.current) {
                 isLoadingRef.current = false
@@ -115,29 +94,6 @@ function Home() {
         }
     }, [])
 
-    // Fetch Notifications
-    const fetchNotifications = useCallback(async () => {
-        isLoadingRef.current = true
-        setLoading(true)
-        setError(null)
-        const requestId = viewRequestRef.current
-        try {
-            const data = await subscriptionApi.getNotifications()
-            if (requestId !== viewRequestRef.current) return
-            setVideos(data)
-            hasMoreRef.current = false
-            setHasMore(false)
-        } catch (err) {
-            console.error("Failed to fetch notifications:", err)
-            setError("無法載入通知")
-        } finally {
-            if (requestId === viewRequestRef.current) {
-                isLoadingRef.current = false
-                setLoading(false)
-            }
-        }
-    }, [])
-
     // Initial load when tab changes
     useEffect(() => {
         viewRequestRef.current += 1
@@ -152,43 +108,19 @@ function Home() {
             fetchFeed(true)
         } else if (activeTab === 'subscriptions' && user) {
             fetchSubscriptions()
-        } else if (activeTab === 'notifications' && user) {
-            fetchNotifications()
-        } else {
-            fetchTrending()
+        } else if (!user) {
+            setLoading(false)
+            setHasMore(false)
         }
-    }, [activeTab, user, fetchFeed, fetchSubscriptions, fetchNotifications, fetchTrending])
+    }, [activeTab, user, fetchFeed, fetchSubscriptions])
 
-    // Listen for notification changes globally
+    // Sync once after the first page is visible. The sync endpoint merely
+    // starts background work, so a one-second timer is not a completion signal.
     useEffect(() => {
-        const handleNotifyChange = () => {
-            if (activeTab === 'notifications' && user) {
-                fetchNotifications()
-            }
-        }
-        window.addEventListener('notification-change', handleNotifyChange)
-        return () => window.removeEventListener('notification-change', handleNotifyChange)
-    }, [activeTab, user, fetchNotifications])
-
-    // Auto-sync on mount
-    useEffect(() => {
-        if (user && activeTab === 'recommended') {
-            const autoSync = async () => {
-                try {
-                    setSyncing(true)
-                    await feedApi.sync()
-                    setTimeout(() => {
-                        if (activeTab === 'recommended') fetchFeed(false)
-                    }, 1000)
-                } catch (e) {
-                    console.error("Auto sync failed:", e)
-                } finally {
-                    setSyncing(false)
-                }
-            }
-            autoSync()
-        }
-    }, [user, activeTab, fetchFeed])
+        if (!user || activeTab !== 'recommended' || videos.length === 0 || syncRequestedRef.current) return
+        syncRequestedRef.current = true
+        feedApi.sync().catch(error => console.error('Auto sync failed:', error))
+    }, [user, activeTab, videos.length])
 
     // Stable Observer for infinite scroll (sentinel-based)
     useEffect(() => {
@@ -212,17 +144,9 @@ function Home() {
         }
     }, [videos.length])
 
-    // ... (rest is same until render)
-
-    const handleSync = async () => {
-        // ... (can keep function or remove if unused, but removing button is key)
-    }
-
     const handleRetry = () => {
         if (activeTab === 'recommended') fetchFeed(true)
         else if (activeTab === 'subscriptions') fetchSubscriptions()
-        else if (activeTab === 'trending') fetchTrending()
-        else fetchNotifications()
     }
 
     return (
@@ -255,7 +179,7 @@ function Home() {
                             textAlign: 'center'
                         }}
                     >
-                        {user ? '為您推薦' : '登入以獲推薦'}
+                        為您推薦
                     </button>
                 )}
 
@@ -277,40 +201,6 @@ function Home() {
                     </button>
                 )}
 
-                <button
-                    onClick={() => setActiveTab('trending')}
-                    style={{
-                        fontSize: '1.2rem',
-                        fontWeight: activeTab === 'trending' ? 'bold' : 'normal',
-                        color: activeTab === 'trending' ? 'var(--accent)' : 'var(--text-secondary)',
-                        borderBottom: activeTab === 'trending' ? '2px solid var(--accent)' : 'none',
-                        paddingBottom: '4px',
-                        flex: 1,
-                        minWidth: 0,
-                        textAlign: 'center'
-                    }}
-                >
-                    熱門發燒
-                </button>
-
-                {user && (
-                    <button
-                        onClick={() => setActiveTab('notifications')}
-                        style={{
-                            fontSize: '1.2rem',
-                            fontWeight: activeTab === 'notifications' ? 'bold' : 'normal',
-                            color: activeTab === 'notifications' ? 'var(--accent)' : 'var(--text-secondary)',
-                            borderBottom: activeTab === 'notifications' ? '2px solid var(--accent)' : 'none',
-                            paddingBottom: '4px',
-                            flex: 1,
-                            minWidth: 0,
-                            textAlign: 'center'
-                        }}
-                    >
-                        最新通知
-                    </button>
-                )}
-
                 <div style={{ flex: 1 }}></div>
 
                 {/* Sync Button Removed (Auto Sync Enabled) */}
@@ -326,12 +216,12 @@ function Home() {
                 <>
                     {videos.length === 0 && !loading ? (
                         <div style={{ textAlign: 'center', padding: '40px', color: '#666' }}>
-                            {activeTab === 'recommended'
+                            {!user
+                                ? '請先登入以取得為您推薦內容'
+                                : activeTab === 'recommended'
                                 ? '還沒有推薦內容，試著先同步訂閱或觀看一些影片吧！'
                                 : activeTab === 'subscriptions'
                                     ? '還沒有訂閱任何頻道，去訂閱一些頻道吧！'
-                                    : activeTab === 'notifications'
-                                        ? '過去 7 天內沒有新通知'
                                         : '沒有影片'}
                         </div>
                     ) : (

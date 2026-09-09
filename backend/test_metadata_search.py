@@ -139,6 +139,19 @@ class MetadataSearchTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(await service.get_channel_latest_videos(channel_id), feeds[0])
             self.assertEqual(downloader.call_count, 1)
 
+    async def test_search_preserves_dates_without_resolving_video_streams(self):
+        with patch('services.ytdlp_service.yt_dlp.YoutubeDL') as downloader:
+            downloader.return_value.__enter__.return_value.extract_info.return_value = {
+                'entries': [{'id': VIDEO_ID, 'title': 'Service', 'duration': 10475,
+                             'timestamp': 1788912000, 'uploader': 'Bethel'}],
+            }
+            results = await ytdlp_service.search('Bethel', max_results=50)
+            options = downloader.call_args.args[0]
+            self.assertTrue(options['extract_flat'])
+            self.assertEqual(options['extractor_args']['youtubetab']['approximate_date'], ['true'])
+            self.assertEqual(results[0]['published_at'], '2026-09-09T00:00:00+00:00')
+            self.assertEqual(results[0]['duration'], 10475)
+
 
 if __name__ == '__main__':
     unittest.main()

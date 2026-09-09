@@ -69,6 +69,7 @@ class InvidiousService:
                     "is_live": data.get("liveNow", False),
                     "view_count": data.get("viewCount"),
                     "upload_date": data.get("published"),
+                    "published_at": data.get("published"),
                     "streams": streams,
                 }
         except Exception as e:
@@ -103,6 +104,7 @@ class InvidiousService:
                             "duration": item.get("lengthSeconds"),
                             "is_live": item.get("liveNow", False),
                             "view_count": item.get("viewCount"),
+                            "upload_date": item.get("published"),
                             "published_at": item.get("published"),
                         })
                 
@@ -130,6 +132,7 @@ class InvidiousService:
                     "duration": item.get("lengthSeconds"),
                     "is_live": item.get("liveNow", False),
                     "view_count": item.get("viewCount"),
+                    "upload_date": item.get("published"),
                     "published_at": item.get("published"),
                 } for item in data[:20]]
         except Exception as e:
