@@ -62,4 +62,10 @@ jobs:
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SERVER_SSH_KEY }}
           script: |
+            for d in $(find /home -maxdepth 4 -type d -name "youtube-no-add" 2>/dev/null); do
+              if [ -d "$d/.git" ]; then
+                echo "Found repo at $d, stashing local changes..."
+                git -C "$d" stash --include-untracked || true
+              fi
+            done
             /home/ricky/deployments/scripts/deploy-app.sh youtube-no-add
