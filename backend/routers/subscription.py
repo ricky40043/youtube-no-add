@@ -40,6 +40,8 @@ class VideoFeedItem(BaseModel):
     published_at: Optional[str] = None
     view_count: Optional[str | int] = None
     duration: Optional[int] = None
+    is_live: bool = False
+    live_status: Optional[str] = None
 
 
 # --- Endpoints ---
@@ -280,6 +282,8 @@ async def get_notifications(
                 "published_at": pub,
                 "view_count": v.get('view_count'),
                 "duration": v.get('duration'),
+                "is_live": bool(v.get('is_live')),
+                "live_status": v.get('live_status'),
             })
 
     feed_items.sort(key=lambda x: x.get('published_at') or '', reverse=True)

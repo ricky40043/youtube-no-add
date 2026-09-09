@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { getSearchHistory, removeSearchHistory, clearSearchHistory } from '../utils/searchHistory'
 import { searchApi, authApi, searchHistoryApi } from '../services/api'
+import { extractYouTubeVideoId } from '../utils/video'
 
 function SearchDropdown({ query, isVisible, onSelect, onFillQuery, onClose }) {
     const [history, setHistory] = useState([])
@@ -8,6 +9,7 @@ function SearchDropdown({ query, isVisible, onSelect, onFillQuery, onClose }) {
     const [isLoggedIn, setIsLoggedIn] = useState(false)
     const dropdownRef = useRef(null)
     const debounceRef = useRef(null)
+    const directVideoId = extractYouTubeVideoId(query)
 
     // Check login status on mount and when auth changes
     useEffect(() => {
@@ -55,14 +57,16 @@ function SearchDropdown({ query, isVisible, onSelect, onFillQuery, onClose }) {
         if (!isVisible) return
 
         if (debounceRef.current) clearTimeout(debounceRef.current)
+        let cancelled = false
+        setSuggestions([])
 
-        if (query && query.trim().length >= 1) {
+        if (query && query.trim().length >= 1 && !directVideoId) {
             debounceRef.current = setTimeout(async () => {
                 try {
                     const results = await searchApi.getSuggestions(query.trim())
-                    setSuggestions(results || [])
+                    if (!cancelled) setSuggestions(results || [])
                 } catch {
-                    setSuggestions([])
+                    if (!cancelled) setSuggestions([])
                 }
             }, 300)
         } else {
@@ -70,9 +74,10 @@ function SearchDropdown({ query, isVisible, onSelect, onFillQuery, onClose }) {
         }
 
         return () => {
+            cancelled = true
             if (debounceRef.current) clearTimeout(debounceRef.current)
         }
-    }, [query, isVisible])
+    }, [query, isVisible, directVideoId])
 
     // Click outside to close
     useEffect(() => {
@@ -101,7 +106,7 @@ function SearchDropdown({ query, isVisible, onSelect, onFillQuery, onClose }) {
     }, [isVisible, onClose])
 
     // Filter history by query
-    const filteredHistory = query.trim()
+    const filteredHistory = directVideoId ? [] : query.trim()
         ? history.filter(item =>
             item.query.toLowerCase().includes(query.trim().toLowerCase())
         )
@@ -109,7 +114,7 @@ function SearchDropdown({ query, isVisible, onSelect, onFillQuery, onClose }) {
 
     // Filter suggestions to exclude items already in history
     const historyQueries = new Set(filteredHistory.map(h => h.query.toLowerCase()))
-    const filteredSuggestions = suggestions.filter(s => !historyQueries.has(s.toLowerCase()))
+    const filteredSuggestions = directVideoId ? [] : suggestions.filter(s => !historyQueries.has(s.toLowerCase()))
 
     // Delete history item
     const handleDelete = useCallback((queryToDelete, e) => {
@@ -172,6 +177,11 @@ function SearchDropdown({ query, isVisible, onSelect, onFillQuery, onClose }) {
 
     return (
         <div className="search-dropdown" ref={dropdownRef}>
+            {directVideoId && (
+                <button type="button" className="dropdown-item" onClick={() => onSelect(query.trim())} style={{ width: '100%', textAlign: 'left' }}>
+                    搜尋這部 YouTube 影片
+                </button>
+            )}
             {/* History Header */}
             {filteredHistory.length > 0 && !query.trim() && (
                 <div className="dropdown-header">
@@ -286,7 +296,7 @@ function SearchDropdown({ query, isVisible, onSelect, onFillQuery, onClose }) {
             ))}
 
             {/* No results hint */}
-            {query.trim() && filteredHistory.length === 0 && filteredSuggestions.length === 0 && (
+            {!directVideoId && query.trim() && filteredHistory.length === 0 && filteredSuggestions.length === 0 && (
                 <div className="dropdown-empty">
                     沒有符合的紀錄或建議
                 </div>

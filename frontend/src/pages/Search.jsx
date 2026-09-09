@@ -3,7 +3,9 @@ import { useSearchParams } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import VideoCard from '../components/VideoCard'
 import { searchApi } from '../services/api'
+import { getVideoMetadata } from '../services/videoMetadata'
 import { updateSearchHistoryThumbnail } from '../utils/searchHistory'
+import { extractYouTubeVideoId } from '../utils/video'
 
 function Search() {
     const [searchParams] = useSearchParams()
@@ -114,6 +116,17 @@ function Search() {
                 setLoading(true)
                 isLoadingRef.current = true
                 setError(null)
+                const videoId = extractYouTubeVideoId(query)
+                if (videoId) {
+                    hasMoreRef.current = false
+                    setHasMore(false)
+                    setHasMoreRelated(false)
+                    const video = await getVideoMetadata(videoId)
+                    if (controller.signal.aborted || requestId !== searchRequestRef.current) return
+                    setVideos([video])
+                    if (video.thumbnail) updateSearchHistoryThumbnail(query, video.thumbnail)
+                    return
+                }
                 // Progressive search: append five results per batch up to fifty.
                 await searchApi.streamSearch(query, {
                     signal: controller.signal,
@@ -146,9 +159,9 @@ function Search() {
                     console.error('Failed to fetch related:', relErr)
                 }
             } catch (err) {
-                if (err.name === 'AbortError') return
+                if (controller.signal.aborted || requestId !== searchRequestRef.current || err.name === 'AbortError') return
                 console.error('Search failed:', err)
-                setError('搜尋失敗，請稍後再試')
+                setError(err.response?.status === 404 ? '找不到這部影片，可能已下架、設為私人或網址有誤' : '搜尋失敗，請稍後再試')
             } finally {
                 if (requestId === searchRequestRef.current) {
                     isLoadingRef.current = false

@@ -1,4 +1,5 @@
 import yt_dlp
+from yt_dlp.utils import parse_duration
 import asyncio
 from functools import partial
 from typing import Optional, Dict, Any, List
@@ -84,6 +85,8 @@ class YtDlpService:
                     "thumbnail": info.get("thumbnail"),
                     "description": info.get("description", "")[:500],
                     "duration": info.get("duration"),
+                    "is_live": info.get("is_live", False),
+                    "live_status": info.get("live_status"),
                     "view_count": info.get("view_count"),
                     "upload_date": info.get("upload_date"),
                     "upload_date": info.get("upload_date"),
@@ -362,7 +365,9 @@ class YtDlpService:
                             'id': entry.get('id'),
                             'title': entry.get('title'),
                             'thumbnail': entry.get('thumbnails', [{}])[0].get('url') if entry.get('thumbnails') else None,
-                            'duration': entry.get('duration'),
+                            'duration': entry.get('duration') or parse_duration(entry.get('duration_string')),
+                            'is_live': entry.get('is_live', False),
+                            'live_status': entry.get('live_status'),
                             'author': entry.get('uploader'),
                             'channel_id': entry.get('channel_id'),
                             'view_count': entry.get('view_count'),
@@ -591,11 +596,9 @@ class YtDlpService:
                                 "author": entry.get('uploader') or info.get('uploader') or info.get('title'),
                                 "channel_id": channel_id,
                                 "view_count": entry.get('view_count'),
-                                "duration": entry.get('duration'),
-                                "view_count": entry.get('view_count'),
-                                "duration": entry.get('duration'),
-                                "view_count": entry.get('view_count'),
-                                "duration": entry.get('duration'),
+                                "duration": entry.get('duration') or parse_duration(entry.get('duration_string')),
+                                "is_live": entry.get('is_live', False),
+                                "live_status": entry.get('live_status'),
                                 "published_at": self._format_date(entry.get('upload_date') or entry.get('release_date'))
                             })
                 return results

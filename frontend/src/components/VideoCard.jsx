@@ -1,18 +1,7 @@
 import { useNavigate } from 'react-router-dom'
 import { motion } from 'framer-motion'
+import VideoDuration from './VideoDuration'
 import { formatTimeAgo } from '../utils/date'
-
-function formatDuration(seconds) {
-    if (!seconds) return ''
-    const hrs = Math.floor(seconds / 3600)
-    const mins = Math.floor((seconds % 3600) / 60)
-    const secs = seconds % 60
-
-    if (hrs > 0) {
-        return `${hrs}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`
-    }
-    return `${mins}:${secs.toString().padStart(2, '0')}`
-}
 
 function formatViews(count) {
     if (!count) return ''
@@ -57,11 +46,7 @@ function VideoCard({ video, type = 'vertical' }) {
                         e.target.src = `https://i.ytimg.com/vi/${video.id}/hqdefault.jpg`
                     }}
                 />
-                {video.duration && (
-                    <span className="video-duration">
-                        {formatDuration(video.duration)}
-                    </span>
-                )}
+                <VideoDuration video={video} />
             </div>
             <div className="video-info">
                 <h3 className="video-title">
