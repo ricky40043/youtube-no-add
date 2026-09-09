@@ -1,10 +1,81 @@
 from fastapi import APIRouter, Query
+from fastapi.responses import StreamingResponse
+import asyncio
+import json
+import re
+import jieba
 from services.ytdlp_service import ytdlp_service
 from services.invidious_service import invidious_service
 from services.cache_service import cache_service
 from config import get_settings
 
 router = APIRouter()
+
+
+def _sse(event: str, payload: dict) -> str:
+    return f"event: {event}\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n"
+
+
+async def _stream_search_batches(q: str, sort: str = "relevance"):
+    """Yield search results in batches, up to fifty items."""
+    settings = get_settings()
+    full_key = f"search:full:{q}:{sort}"
+    cached = await cache_service.get(full_key)
+    accumulated = []
+    seen = set()
+
+    if cached:
+        cached_batch = []
+        for video in cached[:50]:
+            video_id = video.get("id")
+            if video_id and video_id not in seen:
+                seen.add(video_id)
+                accumulated.append(video)
+                cached_batch.append(video)
+                if len(cached_batch) >= 10:
+                    yield _sse("batch", {"results": cached_batch, "count": len(accumulated), "done": len(accumulated) >= len(cached[:50])})
+                    cached_batch = []
+        if cached_batch:
+            yield _sse("batch", {"results": cached_batch, "count": len(accumulated), "done": True})
+        yield _sse("complete", {"count": len(accumulated), "cached": True})
+        return
+
+    # Single fast flat search (fetching up to 50 results in 1 yt-dlp run)
+    results = await ytdlp_service.search(q, max_results=50, offset=0, sort=sort)
+    if not results:
+        results = await invidious_service.search(q, 50)
+
+    if results:
+        for video in results:
+            video_id = video.get("id")
+            if video_id and video_id not in seen:
+                seen.add(video_id)
+                accumulated.append(video)
+
+        # Cache full results
+        await cache_service.set(full_key, accumulated[:50], ttl=settings.search_cache_ttl)
+
+        # Stream batches quickly to client
+        batch_size = 10
+        for i in range(0, len(accumulated), batch_size):
+            chunk = accumulated[i:i + batch_size]
+            is_done = (i + batch_size) >= len(accumulated)
+            yield _sse("batch", {"results": chunk, "count": min(i + batch_size, len(accumulated)), "done": is_done})
+            await asyncio.sleep(0.01)
+
+    yield _sse("complete", {"count": len(accumulated), "cached": False})
+
+
+@router.get("/stream")
+async def stream_search_videos(
+    q: str = Query(..., description="搜尋關鍵字"),
+    sort: str = Query("relevance", description="排序: relevance / date / views"),
+):
+    return StreamingResponse(
+        _stream_search_batches(q, sort),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @router.get("")
@@ -116,36 +187,29 @@ async def get_search_related(
     - **limit**: 返回的推薦數量
     - **offset**: 分頁偏移
     """
-    import jieba
-    import re
+    # Fast keyword extraction
+    cleaned_q = re.sub(r'[^\w\s\u4e00-\u9fff]', ' ', q).strip()
+    words = [w.strip() for w in jieba.cut(cleaned_q) if len(w.strip()) > 1]
+    if not words:
+        words = cleaned_q.split()
 
-    # Extract keywords using jieba
-    words = list(jieba.cut(q))
-    # Filter meaningful words (length > 1)
-    keywords = [w for w in words if len(w) > 1]
-    
-    if not keywords:
+    if not words:
         return {"results": []}
-    
-    # Use different keyword combinations for more diversity
-    # Try different subsets of keywords
+
+    cache_key = f"search:related:{q}"
+    cached = await cache_service.get(cache_key)
+    if cached is not None:
+        return {"results": cached[offset:offset + limit]}
+
+    # Build focused search queries (at most 1-2 targeted searches)
+    search_query = " ".join(words[:4])
     all_results = []
-    keyword_subsets = [
-        keywords[:3],  # First 3 keywords
-        keywords[-3:] if len(keywords) >= 3 else keywords,  # Last 3 keywords
-        keywords[::2] if len(keywords) > 2 else keywords,  # Every other keyword
-    ]
-    
-    for kw_subset in keyword_subsets:
-        if not kw_subset:
-            continue
-        query = " ".join(kw_subset)
-        try:
-            results = await ytdlp_service.search(query, max_results=30)
-            all_results.extend(results)
-        except Exception as e:
-            print(f"[Search Related] Search failed for query '{query}': {e}")
-    
+    try:
+        results = await ytdlp_service.search(search_query, max_results=30)
+        all_results.extend(results)
+    except Exception as e:
+        print(f"[Search Related] Search failed for query '{search_query}': {e}")
+
     # Remove duplicates by id
     seen_ids = set()
     unique_results = []
@@ -155,10 +219,7 @@ async def get_search_related(
             seen_ids.add(vid)
             unique_results.append(video)
 
-    # Rank by keyword overlap with the original query (relevance-first), with
-    # view_count as a minor tie-breaker — instead of pure random.shuffle, which
-    # produced low-relevance recommendations.
-    keyword_set = set(k.lower() for k in keywords)
+    keyword_set = set(k.lower() for k in words)
 
     def _title_tokens(t):
         cleaned = re.sub(r'[\[\]【】\(\)『』～~「」《》#|\-_]', ' ', (t or '').lower())
@@ -171,5 +232,9 @@ async def get_search_related(
     unique_results.sort(key=lambda v: -v.get('_score', 0))
     for v in unique_results:
         v.pop('_score', None)
+
+    # Cache for 10 minutes
+    if unique_results:
+        await cache_service.set(cache_key, unique_results, ttl=600)
 
     return {"results": unique_results[offset:offset + limit]}

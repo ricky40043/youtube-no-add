@@ -33,78 +33,15 @@ function Watch() {
     const [loopMode, setLoopMode] = useState(() => localStorage.getItem('loopMode') === 'true')
     const [embedError, setEmbedError] = useState(false)
     const [savedTime, setSavedTime] = useState(0)
-    const [isMiniPlayer, setIsMiniPlayer] = useState(false)
-    const [miniPlayerDismissed, setMiniPlayerDismissed] = useState(false)
     const youtubePlayerRef = useRef(null)
     const videoTimeRef = useRef(0)
     const lastVideoIdRef = useRef(null)
-    const playerTriggerRef = useRef(null)
-    
-    // Feature: Hide background playback buttons on desktop
     const isMobile = useIsMobile(1024)
-
-    // Behave like the mobile YouTube player: once the main player has left
-    // the viewport, keep it floating above the related-video feed. Returning
-    // to the player restores it to its original position.
-    useEffect(() => {
-        if (!isMobile) {
-            setIsMiniPlayer(false)
-            return undefined
-        }
-
-        const handlePlayerScroll = () => {
-            const player = playerTriggerRef.current
-            if (!player || miniPlayerDismissed) return
-            if (isMiniPlayer) {
-                if (window.scrollY <= 120) setIsMiniPlayer(false)
-                return
-            }
-            const rect = player.getBoundingClientRect()
-            const shouldMini = rect.bottom < 0 && window.scrollY > 120
-            setIsMiniPlayer(shouldMini)
-        }
-
-        window.addEventListener('scroll', handlePlayerScroll, { passive: true })
-        handlePlayerScroll()
-        return () => window.removeEventListener('scroll', handlePlayerScroll)
-    }, [isMobile, isMiniPlayer, miniPlayerDismissed, videoId])
-
-    useEffect(() => {
-        setIsMiniPlayer(false)
-        setMiniPlayerDismissed(false)
-    }, [videoId])
-
     // Feature: Video history stack for "Go Back" functionality
     const [videoHistory, setVideoHistory] = useState(() => {
         const saved = localStorage.getItem('videoHistory')
         return saved ? JSON.parse(saved) : []
     })
-
-    // Mobile browser back gesture. Keep it on the page shell so it does not
-    // interfere with the player's timeline/controls.
-    const swipeStartRef = useRef(null)
-    const handleWatchTouchStart = useCallback((event) => {
-        const touch = event.touches[0]
-        if (!touch) return
-        if (event.target.closest?.('.player-controls, button, input, select')) {
-            swipeStartRef.current = null
-            return
-        }
-        swipeStartRef.current = { x: touch.clientX, y: touch.clientY }
-    }, [])
-
-    const handleWatchTouchEnd = useCallback((event) => {
-        const start = swipeStartRef.current
-        swipeStartRef.current = null
-        const touch = event.changedTouches[0]
-        if (!start || !touch || !isMobile) return
-
-        const dx = touch.clientX - start.x
-        const dy = touch.clientY - start.y
-        if (Math.abs(dx) >= 80 && Math.abs(dy) < 60) {
-            navigate(-1)
-        }
-    }, [isMobile, navigate])
 
     const onPlayerReady = (event) => {
         youtubePlayerRef.current = event.target
@@ -227,7 +164,13 @@ function Watch() {
                     items = items.filter(item => item && item.id)
                     console.log('[Watch] Valid related videos:', items.length)
                     setRelatedVideos(items)
-                    setRelatedHasMore(false) // No pagination
+                    if (data && typeof data === 'object' && 'next_offset' in data) {
+                        setRelatedHasMore(data.next_offset !== null)
+                        setRelatedOffset(data.next_offset || items.length)
+                    } else {
+                        setRelatedHasMore(items.length >= 20)
+                        setRelatedOffset(items.length)
+                    }
                 })
                 .catch(err => {
                     console.error('[Watch] Failed to load related videos', err)
@@ -495,34 +438,31 @@ function Watch() {
         fetchVideo()
     }, [videoId, useEmbed])
 
-    // Scroll to top when video changes and save to history
-    const prevVideoIdRef = useRef(null)
-    
+    // Only scroll to top when navigating to a DIFFERENT video
+    const prevScrollVideoIdRef = useRef(null)
     useEffect(() => {
-        console.log('[Watch] Video changed, scrolling to top')
-        window.scrollTo(0, 0)
-        
-        // Save current video to history before switching
-        if (prevVideoIdRef.current && prevVideoIdRef.current !== videoId) {
-            setVideoHistory(prev => {
-                // Avoid duplicates - remove if already exists, then add to front
-                const filtered = prev.filter(v => v.id !== prevVideoIdRef.current)
-                const newHistory = [
-                    {
-                        id: prevVideoIdRef.current,
-                        title: videoInfo?.title || '影片',
-                        thumbnail: videoInfo?.thumbnail || ''
-                    },
-                    ...filtered
-                ].slice(0, 50) // Keep max 50 items
-                
-                localStorage.setItem('videoHistory', JSON.stringify(newHistory))
-                console.log('[Watch] Added to history, total:', newHistory.length)
-                return newHistory
-            })
+        if (prevScrollVideoIdRef.current !== videoId) {
+            window.scrollTo(0, 0)
+            prevScrollVideoIdRef.current = videoId
         }
-        
-        prevVideoIdRef.current = videoId
+    }, [videoId])
+
+    // Save video to history when videoInfo is available
+    useEffect(() => {
+        if (!videoId || !videoInfo?.title) return
+        setVideoHistory(prev => {
+            const filtered = prev.filter(v => v.id !== videoId)
+            const newHistory = [
+                {
+                    id: videoId,
+                    title: videoInfo.title,
+                    thumbnail: videoInfo.thumbnail || ''
+                },
+                ...filtered
+            ].slice(0, 50)
+            localStorage.setItem('videoHistory', JSON.stringify(newHistory))
+            return newHistory
+        })
     }, [videoId, videoInfo])
 
     // Stabilize the iframe URL to prevent unnecessary reloads during UI re-renders
@@ -780,8 +720,6 @@ function Watch() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             transition={{ duration: 0.3 }}
-            onTouchStart={handleWatchTouchStart}
-            onTouchEnd={handleWatchTouchEnd}
         >
             {/* Full-screen loading overlay only for initial load (no videoInfo yet) */}
             {loading && !videoInfo && (
@@ -809,16 +747,7 @@ function Watch() {
             <div className="watch-container">
                 <div className="main-content">
                     <div className="player-section">
-                        <div
-                            ref={playerTriggerRef}
-                            className={`video-container ${isMiniPlayer ? 'is-mini-player' : ''}`}
-                            style={{
-                                aspectRatio: videoInfo?.width && videoInfo?.height
-                                    ? `${videoInfo.width} / ${videoInfo.height}`
-                                    : '16 / 9',
-                                position: 'relative'
-                            }}
-                        >
+                        <div className="video-container">
                             {useEmbed ? (
                                 <div style={{ position: 'relative', width: '100%', height: '100%' }}>
                                     <YouTube
@@ -908,28 +837,6 @@ function Watch() {
                                         }}
                                     />
                                 </>
-                            )}
-                            {isMiniPlayer && (
-                                <div className="mini-player-actions">
-                                    <button
-                                        type="button"
-                                        aria-label="恢復播放器"
-                                        title="恢復播放器"
-                                        onClick={() => {
-                                            setIsMiniPlayer(false)
-                                            window.scrollTo({ top: 0, behavior: 'smooth' })
-                                        }}
-                                    >↗</button>
-                                    <button
-                                        type="button"
-                                        aria-label="關閉縮小播放器"
-                                        title="關閉縮小播放器"
-                                        onClick={() => {
-                                            setIsMiniPlayer(false)
-                                            setMiniPlayerDismissed(true)
-                                        }}
-                                    >×</button>
-                                </div>
                             )}
                         </div>
 
@@ -1245,7 +1152,7 @@ function Watch() {
                             <div style={{ padding: '12px 16px 8px' }}>
                                 <span style={{ fontSize: '0.95rem', fontWeight: '600' }}>相關影片</span>
                             </div>
-                            {loadingRelated ? (
+                            {loadingRelated && relatedVideos.length === 0 ? (
                                 <div style={{ padding: '40px 20px', textAlign: 'center', color: '#aaa' }}>
                                     <div className="loading-spinner" style={{
                                         margin: '0 auto 12px',
@@ -1260,43 +1167,44 @@ function Watch() {
                                 </div>
                             ) : relatedVideos.length > 0 ? (
                                 <>
-                                    {relatedVideos.map(video => (
-                                        <VideoCard key={video.id} video={video} type={isMobile ? 'vertical' : 'horizontal'} />
+                                    {relatedVideos.map((video, idx) => (
+                                        <VideoCard key={video.id ? `${video.id}_${idx}` : idx} video={video} type="horizontal" />
                                     ))}
                                     {/* Load More Related Videos Button */}
-                                    {relatedHasMore && !loadingRelated && (
-                                        <button 
-                                            onClick={loadMoreRelatedVideos}
-                                            style={{ 
-                                                display: 'block', 
-                                                margin: '16px auto', 
-                                                padding: '10px 20px',
-                                                background: 'var(--accent)',
-                                                color: 'white',
-                                                border: 'none',
-                                                borderRadius: '20px',
-                                                cursor: 'pointer',
-                                                fontSize: '13px'
-                                            }}
-                                        >
-                                            載入更多相關影片
-                                        </button>
+                                    {relatedHasMore && (
+                                        <div style={{ padding: '16px', textAlign: 'center' }}>
+                                            <button 
+                                                type="button"
+                                                onClick={(e) => { e.preventDefault(); e.stopPropagation(); loadMoreRelatedVideos() }}
+                                                disabled={loadingRelated}
+                                                style={{ 
+                                                    display: 'inline-block', 
+                                                    padding: '10px 24px',
+                                                    background: loadingRelated ? '#333' : 'var(--accent)',
+                                                    color: 'white',
+                                                    border: 'none',
+                                                    borderRadius: '20px',
+                                                    cursor: loadingRelated ? 'not-allowed' : 'pointer',
+                                                    fontSize: '13px',
+                                                    opacity: loadingRelated ? 0.7 : 1,
+                                                    transition: 'background 0.2s'
+                                                }}
+                                            >
+                                                {loadingRelated ? '載入更多相關影片中...' : '載入更多相關影片'}
+                                            </button>
+                                        </div>
                                     )}
 
-                                    {!relatedHasMore && relatedVideos.length > 0 && !loadingRelated && (
+                                    {!relatedHasMore && !loadingRelated && (
                                         <div style={{ textAlign: 'center', padding: '16px', color: '#666', fontSize: '13px' }}>
                                             沒有更多相關影片了
                                         </div>
                                     )}
                                 </>
                             ) : (
-                                <>
-                                    {!loadingRelated && (
-                                        <div style={{ padding: '60px 20px', textAlign: 'center', color: '#666', fontSize: '0.9rem' }}>
-                                            暫無相關影片
-                                        </div>
-                                    )}
-                                </>
+                                <div style={{ padding: '60px 20px', textAlign: 'center', color: '#666', fontSize: '0.9rem' }}>
+                                    暫無相關影片
+                                </div>
                             )}
                         </div>
                     )}
@@ -1307,6 +1215,9 @@ function Watch() {
                 .watch-page {
                     width: 100%;
                     max-width: 100%;
+                    overflow-x: hidden;
+                    overscroll-behavior-x: none;
+                    touch-action: pan-y;
                 }
                 
                 @keyframes spin {
@@ -1334,20 +1245,13 @@ function Watch() {
 
                 .video-container {
                     width: 100%;
+                    aspect-ratio: 16 / 9;
                     background: #000;
                     border-radius: 12px;
                     overflow: hidden;
                     max-height: 80vh;
                 }
-
-                .youtube-player-container,
-                .youtube-player-container iframe {
-                    display: block;
-                    width: 100% !important;
-                    height: 100% !important;
-                    border: 0;
-                }
-
+                
                 .video-details {
                     padding: 16px 0;
                 }
@@ -1483,135 +1387,39 @@ function Watch() {
                 }
 
                 @media (max-width: 1024px) {
-                    .watch-page {
-                        /* Break out of the App <main> padding.  Using the
-                           viewport here is important when the page is opened
-                           inside a narrow/mobile webview: +32px only makes the
-                           player wider than its content box, not full bleed. */
-                        width: 100vw;
-                        max-width: 100vw;
-                        margin-left: calc(50% - 50vw);
-                        overflow-x: clip;
-                    }
-
                     .watch-container {
                         flex-direction: column;
-                        /* Full-size mode keeps a comfortable, centered frame
-                           like the reference UI.  The player is full width of
-                           this content area; mini mode is fixed independently
-                           below and ignores this padding. */
                         padding: 0;
                         gap: 0;
                         width: 100%;
+                        max-width: 100vw;
                     }
 
-                    .watch-page > .watch-container > .main-content {
+                    .main-content {
                         width: 100%;
-                        max-width: none;
                         padding: 0;
-                    }
-
-                    .player-section {
-                        width: 100%;
-                        padding: 16px 16px 0;
-                        box-sizing: border-box;
                     }
 
                     .sidebar {
                         width: 100%;
-                        /* The Watch page's related feed is full-bleed on mobile. */
+                        padding: 0;
+                    }
+
+                    .related-videos {
+                        width: 100%;
                         padding: 0;
                     }
                     
                     .video-container {
-                        border-radius: 12px;
-                        margin-bottom: 0;
-                        width: 100%;
-                        max-width: none;
-                    }
-
-                    .video-container.is-mini-player {
-                        position: fixed;
-                        z-index: 1200;
-                        right: 12px;
-                        bottom: calc(72px + env(safe-area-inset-bottom) + 12px);
-                        width: min(78vw, 360px);
-                        height: auto !important;
-                        aspect-ratio: 16 / 9 !important;
-                        box-shadow: 0 8px 28px rgba(0, 0, 0, 0.65);
-                        border: 1px solid rgba(255, 255, 255, 0.12);
-                    }
-
-                    .mini-player-actions {
-                        position: absolute;
-                        z-index: 20;
-                        top: 8px;
-                        right: 8px;
-                        display: flex;
-                        gap: 6px;
-                    }
-
-                    .mini-player-actions button {
-                        width: 28px;
-                        height: 28px;
-                        padding: 0;
-                        border: 0;
-                        border-radius: 50%;
-                        background: rgba(0, 0, 0, 0.72);
-                        color: #fff;
-                        font-size: 20px;
-                        line-height: 28px;
-                        cursor: pointer;
-                    }
-
-                    .video-details {
-                        padding: 12px 0;
-                    }
-
-                    .related-videos {
-                        /* Related videos on the Watch page are full bleed on
-                           mobile, matching the YouTube mobile feed. */
-                        width: 100%;
-                        padding: 0;
-                    }
-
-                    .related-videos > div:first-child {
-                        padding-left: 0 !important;
-                        padding-right: 0 !important;
-                    }
-
-                    .related-videos .video-card {
-                        margin-bottom: 20px;
-                        width: 100%;
-                    }
-
-                    .related-videos .video-thumbnail {
-                        /* The related-video image itself must span the mobile
-                           viewport instead of remaining a compact card. */
-                        width: 100% !important;
-                        max-width: none;
-                        height: auto !important;
-                        aspect-ratio: 16 / 9;
+                        width: 100vw;
+                        max-width: 100vw;
+                        margin-left: calc(50% - 50vw);
                         border-radius: 0;
+                        margin-bottom: 0;
                     }
-
-                    .related-videos .video-info {
-                        padding: 10px 16px 0;
-                    }
-
-                    .related-videos .video-title {
-                        font-size: 1rem !important;
-                        line-height: 1.45 !important;
-                    }
-
-                    .related-videos .video-author,
-                    .related-videos .video-meta {
-                        font-size: 0.85rem !important;
-                    }
-
-                    /* Leave room for the fixed mobile navigation bar. */
-                    .watch-page {
-                        padding-bottom: 72px;
+                    
+                    .video-details {
+                        padding: 12px 16px;
                     }
                 }
             `}</style>
