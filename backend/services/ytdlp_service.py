@@ -80,7 +80,6 @@ class YtDlpService:
                     "duration": info.get("duration"),
                     "view_count": info.get("view_count"),
                     "upload_date": info.get("upload_date"),
-                    "upload_date": info.get("upload_date"),
                     "published_at": self._format_date(info.get("upload_date") or info.get("release_date")),
                     "tags": info.get("tags", []),
                     "categories": info.get("categories", []),
