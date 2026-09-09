@@ -68,7 +68,9 @@ async def get_feed(
     print(f"[FEED] Request started, cursor={cursor}, limit={limit}, user={user_id}")
     
     # Check cache first (only for first page, anonymous users, or users without history)
-    cache_key = f"feed:{user_id}:{cursor or '0'}:{limit}"
+    # Bump the key when the feed response schema changes so legacy cached
+    # cards without publication metadata cannot hide the upload time forever.
+    cache_key = f"feed:v2:{user_id}:{cursor or '0'}:{limit}"
     if not current_user or not cursor:
         cached = await cache_service.get(cache_key)
         if cached:

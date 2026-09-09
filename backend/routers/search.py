@@ -99,7 +99,9 @@ async def search_videos(
     # This avoids re-running ytsearch on every scroll (slow + duplicate/drift),
     # and keeps pagination stable for the lifetime of the cache entry.
     FULL_SIZE = 50
-    full_key = f"search:full:{q}:{sort}"
+    # Keep stale search results (which may not contain publication metadata)
+    # separate from the current response schema.
+    full_key = f"search:v2:full:{q}:{sort}"
     full = await cache_service.get(full_key)
 
     if full is None:
@@ -126,7 +128,8 @@ async def get_trending(
     from services.cache_service import cache_service
     
     # Check cache first (30 minutes)
-    cache_key = f"trending:{region}"
+    # Invalidate legacy trending payloads that predate published_at.
+    cache_key = f"trending:v2:{region}"
     cached = await cache_service.get(cache_key)
     if cached:
         return {"results": cached}

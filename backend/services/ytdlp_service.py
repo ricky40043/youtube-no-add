@@ -5,6 +5,7 @@ from typing import Optional, Dict, Any, List
 import re
 import os
 import uuid
+from datetime import datetime, timezone
 from config import get_settings
 from services.cache_service import cache_service
 
@@ -86,8 +87,12 @@ class YtDlpService:
                     "duration": info.get("duration"),
                     "view_count": info.get("view_count"),
                     "upload_date": info.get("upload_date"),
-                    "upload_date": info.get("upload_date"),
-                    "published_at": self._format_date(info.get("upload_date") or info.get("release_date")),
+                    "published_at": self._format_date(
+                        info.get("upload_date")
+                        or info.get("release_date")
+                        or info.get("timestamp")
+                        or info.get("release_timestamp")
+                    ),
                     "tags": info.get("tags", []),
                     "categories": info.get("categories", []),
                     "subtitles": self._extract_subtitles(info),
@@ -331,7 +336,10 @@ class YtDlpService:
         opts = {
             'quiet': True,
             'no_warnings': True,
-            'extract_flat': True, # FAST mode
+            # Flat search entries frequently omit upload metadata.  Resolve
+            # the lightweight video entries so the home cards receive the
+            # publication timestamp as well as title/thumbnail.
+            'extract_flat': False,
             'skip_download': True,
             'no_playlist': True,
             'playliststart': start,
@@ -366,7 +374,17 @@ class YtDlpService:
                             'author': entry.get('uploader'),
                             'channel_id': entry.get('channel_id'),
                             'view_count': entry.get('view_count'),
-                            'published_at': entry.get('upload_date'),
+                            # yt-dlp returns upload_date as YYYYMMDD in flat
+                            # search results. Normalize it to the same
+                            # YYYY-MM-DD shape used by the rest of the API so
+                            # the home page can reliably render relative time.
+                            'upload_date': entry.get('upload_date'),
+                            'published_at': self._format_date(
+                                entry.get('upload_date')
+                                or entry.get('release_date')
+                                or entry.get('timestamp')
+                                or entry.get('release_timestamp')
+                            ),
                         })
                 
                 # Ordering: yt-dlp already returns YouTube's relevance order.
@@ -428,18 +446,31 @@ class YtDlpService:
         
         return formatted_subs
 
-    def _format_date(self, date_str: Optional[str]) -> Optional[str]:
-        """Convert various date formats (YYYYMMDD, ISO) to YYYY-MM-DD"""
+    def _format_date(self, date_str: Optional[Any]) -> Optional[str]:
+        """Convert yt-dlp date/timestamp formats to an ISO date string."""
         if not date_str:
             return None
+
+        # Flat search results may expose a Unix timestamp instead of
+        # upload_date. Return an ISO timestamp so the browser can calculate
+        # minutes/hours as well as days.
+        if isinstance(date_str, (int, float)):
+            try:
+                return datetime.fromtimestamp(date_str, tz=timezone.utc).isoformat()
+            except (OverflowError, OSError, ValueError):
+                return None
+
+        date_str = str(date_str)
         
         # Handle YYYYMMDD (yt-dlp default upload_date)
         if len(date_str) == 8 and date_str.isdigit():
             return f"{date_str[:4]}-{date_str[4:6]}-{date_str[6:]}"
         
-        # Handle ISO-like formats (e.g. 2026-02-21T00:00:00)
+        # Preserve the time component when yt-dlp provides one.  Truncating
+        # this to YYYY-MM-DD makes a video uploaded today look like it was
+        # uploaded many hours ago.
         if 'T' in date_str or '-' in date_str:
-            return date_str[:10]
+            return date_str
             
         return date_str
 
