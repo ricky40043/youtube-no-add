@@ -4,6 +4,7 @@ from typing import Optional
 from services.ytdlp_service import ytdlp_service
 from services.invidious_service import invidious_service
 from services.cache_service import cache_service
+from services.video_metadata_service import video_metadata_service
 from config import get_settings
 import asyncio
 import subprocess
@@ -179,6 +180,12 @@ async def merge_stream(request: Request, v: Optional[str] = None, a: Optional[st
         import traceback
         traceback.print_exc()
         return Response(content=f"Internal Server Error: {str(e)}", status_code=500)
+
+@router.get("/metadata/{video_id}")
+async def get_video_metadata(video_id: str):
+    """Get titles, thumbnails and duration without resolving playback streams."""
+    return await video_metadata_service.get(video_id)
+
 
 @router.get("/info/{video_id}")
 async def get_video_info(video_id: str):

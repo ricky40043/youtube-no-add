@@ -66,8 +66,10 @@ class InvidiousService:
                     "thumbnail": data.get("videoThumbnails", [{}])[0].get("url"),
                     "description": data.get("description", "")[:500],
                     "duration": data.get("lengthSeconds"),
+                    "is_live": data.get("liveNow", False),
                     "view_count": data.get("viewCount"),
                     "upload_date": data.get("published"),
+                    "published_at": data.get("published"),
                     "streams": streams,
                 }
         except Exception as e:
@@ -100,7 +102,9 @@ class InvidiousService:
                             "thumbnail": item.get("videoThumbnails", [{}])[0].get("url", 
                                 f"https://i.ytimg.com/vi/{item.get('videoId')}/hqdefault.jpg"),
                             "duration": item.get("lengthSeconds"),
+                            "is_live": item.get("liveNow", False),
                             "view_count": item.get("viewCount"),
+                            "upload_date": item.get("published"),
                             "published_at": item.get("published"),
                         })
                 
@@ -126,7 +130,9 @@ class InvidiousService:
                     "author": item.get("author"),
                     "thumbnail": item.get("videoThumbnails", [{}])[0].get("url"),
                     "duration": item.get("lengthSeconds"),
+                    "is_live": item.get("liveNow", False),
                     "view_count": item.get("viewCount"),
+                    "upload_date": item.get("published"),
                     "published_at": item.get("published"),
                 } for item in data[:20]]
         except Exception as e:

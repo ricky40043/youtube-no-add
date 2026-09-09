@@ -55,7 +55,9 @@ function Navbar() {
         }
     }
 
-    const performSearch = (query) => {
+    const performSearch = useCallback((query) => {
+        query = query.trim()
+        if (!query) return
         // Save to search history (both local and backend if logged in)
         addSearchHistory(query)
         
@@ -65,19 +67,9 @@ function Navbar() {
             searchHistoryApi.add(query).catch(err => console.error('Failed to save search:', err))
         }
 
-        // Check if it's a YouTube URL or video ID
-        const videoIdMatch = query.match(
-            /(?:youtube\.com\/watch\?v=|youtu\.be\/|^)([a-zA-Z0-9_-]{11})(?:$|\?|&)/
-        )
-
         setShowDropdown(false)
-
-        if (videoIdMatch) {
-            navigate(`/watch/${videoIdMatch[1]}`)
-        } else {
-            navigate(`/search?q=${encodeURIComponent(query)}`)
-        }
-    }
+        navigate(`/search?q=${encodeURIComponent(query)}`)
+    }, [navigate])
 
     const handleVoiceSearch = () => {
         if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
@@ -112,7 +104,7 @@ function Navbar() {
     const handleDropdownSelect = useCallback((text) => {
         setSearchQuery(text)
         performSearch(text)
-    }, [navigate])
+    }, [performSearch])
 
     const handleFillQuery = useCallback((text) => {
         setSearchQuery(text)
@@ -135,9 +127,10 @@ function Navbar() {
                     <input
                         type="text"
                         className="search-input"
-                        placeholder="搜尋..."
+                        placeholder="搜尋或貼上 YouTube 網址"
+                        aria-label="搜尋或貼上 YouTube 網址"
                         value={searchQuery}
-                        onChange={(e) => setSearchQuery(e.target.value)}
+                        onChange={(e) => { setSearchQuery(e.target.value); setShowDropdown(true) }}
                         onFocus={() => setShowDropdown(true)}
                     />
                     {searchQuery && showDropdown && (
@@ -160,7 +153,7 @@ function Navbar() {
                             </svg>
                         </button>
                     )}
-                    <button type="submit" className="search-button">
+                    <button type="submit" className="search-button" aria-label="搜尋">
                         <svg viewBox="0 0 24 24" fill="currentColor">
                             <path d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0016 9.5 6.5 6.5 0 109.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z" />
                         </svg>

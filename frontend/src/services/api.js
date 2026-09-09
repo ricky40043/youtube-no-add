@@ -16,6 +16,11 @@ const clearAuthStorage = () => {
 }
 
 export const videoApi = {
+    // Card metadata does not need playback stream extraction.
+    getMetadata: async (videoId) => {
+        const response = await api.get(`/api/video/metadata/${encodeURIComponent(videoId)}`, { timeout: 15000 })
+        return response.data
+    },
     // Get video information
     getInfo: async (videoId) => {
         const response = await api.get(`/api/video/info/${encodeURIComponent(videoId)}`)

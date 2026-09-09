@@ -1,5 +1,8 @@
 import yt_dlp
+from yt_dlp.utils import parse_duration
 import asyncio
+from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timezone
 from functools import partial
 from typing import Optional, Dict, Any, List
 import re
@@ -7,12 +10,16 @@ import os
 import uuid
 from config import get_settings
 from services.cache_service import cache_service
+from services.youtube_url import extract_youtube_video_id
 
 class YtDlpService:
     """yt-dlp wrapper service for extracting video information and stream URLs"""
     
     def __init__(self):
         self.settings = get_settings()
+        self._metadata_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix='video-metadata')
+        self._channel_executor = ThreadPoolExecutor(max_workers=6, thread_name_prefix='channel-list')
+        self._channel_requests = {}
         self.ydl_opts = {
             'quiet': True,
             'no_warnings': True,
@@ -30,15 +37,40 @@ class YtDlpService:
     @staticmethod
     def extract_video_id(url_or_id: str) -> str:
         """Extract video ID from URL or return as-is if already an ID"""
-        patterns = [
-            r'(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([a-zA-Z0-9_-]{11})',
-            r'^([a-zA-Z0-9_-]{11})$'
-        ]
-        for pattern in patterns:
-            match = re.search(pattern, url_or_id)
-            if match:
-                return match.group(1)
-        return url_or_id
+        return extract_youtube_video_id(url_or_id) or url_or_id
+
+    async def get_video_metadata(self, video_id: str) -> Optional[Dict[str, Any]]:
+        """Read card metadata without resolving playable formats or manifests."""
+        opts = {
+            'quiet': True, 'no_warnings': True, 'skip_download': True,
+            'noplaylist': True, 'ignore_no_formats_error': True,
+            'socket_timeout': 4, 'retries': 0, 'extractor_retries': 0,
+            'extractor_args': {'youtube': {
+                'player_client': ['web'],
+                'player_skip': ['js', 'configs', 'initial_data'],
+                'skip': ['hls', 'dash'],
+            }},
+        }
+
+        def extract():
+            with yt_dlp.YoutubeDL(opts) as ydl:
+                return ydl.extract_info(f'https://www.youtube.com/watch?v={video_id}', download=False, process=False)
+
+        try:
+            info = await asyncio.get_running_loop().run_in_executor(self._metadata_executor, extract)
+            if not info:
+                return None
+            return {
+                'id': info.get('id'), 'title': info.get('title'),
+                'author': info.get('uploader') or info.get('channel'),
+                'channel_id': info.get('channel_id'), 'thumbnail': info.get('thumbnail'),
+                'duration': info.get('duration'), 'is_live': bool(info.get('is_live')),
+                'live_status': info.get('live_status'), 'view_count': info.get('view_count'),
+                'published_at': self._format_date(info.get('upload_date') or info.get('release_date')),
+            }
+        except yt_dlp.utils.DownloadError as exc:
+            print(f'[ERROR] Video metadata {video_id}: {exc}')
+            return None
 
     async def get_video_info(self, video_id: str) -> Optional[Dict[str, Any]]:
         """Get video metadata"""
@@ -84,10 +116,16 @@ class YtDlpService:
                     "thumbnail": info.get("thumbnail"),
                     "description": info.get("description", "")[:500],
                     "duration": info.get("duration"),
+                    "is_live": info.get("is_live", False),
+                    "live_status": info.get("live_status"),
                     "view_count": info.get("view_count"),
                     "upload_date": info.get("upload_date"),
-                    "upload_date": info.get("upload_date"),
-                    "published_at": self._format_date(info.get("upload_date") or info.get("release_date")),
+                    "published_at": self._format_date(
+                        info.get("upload_date")
+                        or info.get("release_date")
+                        or info.get("timestamp")
+                        or info.get("release_timestamp")
+                    ),
                     "tags": info.get("tags", []),
                     "categories": info.get("categories", []),
                     "subtitles": self._extract_subtitles(info),
@@ -331,8 +369,14 @@ class YtDlpService:
         opts = {
             'quiet': True,
             'no_warnings': True,
-            'extract_flat': True, # FAST mode
+            # Keep list requests flat. YouTube's relative publication text
+            # supplies an approximate timestamp without resolving 50 streams.
+            'extract_flat': True,
+            'extractor_args': {'youtubetab': {'approximate_date': ['true']}},
             'skip_download': True,
+            'socket_timeout': 4,
+            'retries': 0,
+            'extractor_retries': 0,
             'no_playlist': True,
             'playliststart': start,
             'playlistend': end,
@@ -362,11 +406,23 @@ class YtDlpService:
                             'id': entry.get('id'),
                             'title': entry.get('title'),
                             'thumbnail': entry.get('thumbnails', [{}])[0].get('url') if entry.get('thumbnails') else None,
-                            'duration': entry.get('duration'),
+                            'duration': entry.get('duration') or parse_duration(entry.get('duration_string')),
+                            'is_live': entry.get('is_live', False),
+                            'live_status': entry.get('live_status'),
                             'author': entry.get('uploader'),
                             'channel_id': entry.get('channel_id'),
                             'view_count': entry.get('view_count'),
-                            'published_at': entry.get('upload_date'),
+                            # yt-dlp returns upload_date as YYYYMMDD in flat
+                            # search results. Normalize it to the same
+                            # YYYY-MM-DD shape used by the rest of the API so
+                            # the home page can reliably render relative time.
+                            'upload_date': entry.get('upload_date'),
+                            'published_at': self._format_date(
+                                entry.get('upload_date')
+                                or entry.get('release_date')
+                                or entry.get('timestamp')
+                                or entry.get('release_timestamp')
+                            ),
                         })
                 
                 # Ordering: yt-dlp already returns YouTube's relevance order.
@@ -428,18 +484,31 @@ class YtDlpService:
         
         return formatted_subs
 
-    def _format_date(self, date_str: Optional[str]) -> Optional[str]:
-        """Convert various date formats (YYYYMMDD, ISO) to YYYY-MM-DD"""
+    def _format_date(self, date_str: Optional[Any]) -> Optional[str]:
+        """Convert yt-dlp date/timestamp formats to an ISO date string."""
         if not date_str:
             return None
+
+        # Flat search results may expose a Unix timestamp instead of
+        # upload_date. Return an ISO timestamp so the browser can calculate
+        # minutes/hours as well as days.
+        if isinstance(date_str, (int, float)):
+            try:
+                return datetime.fromtimestamp(date_str, tz=timezone.utc).isoformat()
+            except (OverflowError, OSError, ValueError):
+                return None
+
+        date_str = str(date_str)
         
         # Handle YYYYMMDD (yt-dlp default upload_date)
         if len(date_str) == 8 and date_str.isdigit():
             return f"{date_str[:4]}-{date_str[4:6]}-{date_str[6:]}"
         
-        # Handle ISO-like formats (e.g. 2026-02-21T00:00:00)
+        # Preserve the time component when yt-dlp provides one.  Truncating
+        # this to YYYY-MM-DD makes a video uploaded today look like it was
+        # uploaded many hours ago.
         if 'T' in date_str or '-' in date_str:
-            return date_str[:10]
+            return date_str
             
         return date_str
 
@@ -546,7 +615,30 @@ class YtDlpService:
             return None
 
     async def get_channel_latest_videos(self, channel_id: str, limit: int = 5) -> List[Dict[str, Any]]:
-        """Get latest videos from a channel"""
+        """Share a cached, flat channel listing between feed and notifications."""
+        key = f'channel:latest:flat:{channel_id}:{limit}'
+        cached = await cache_service.get(key)
+        if cached is not None:
+            return cached
+
+        async def fetch_and_cache():
+            try:
+                results = await asyncio.wait_for(self._fetch_channel_latest_videos(channel_id, limit), timeout=10)
+                if results:
+                    await cache_service.set(key, results, ttl=600)
+                return results
+            except asyncio.TimeoutError:
+                print(f'[ERROR] Channel listing timed out: {channel_id}')
+                return []
+            finally:
+                self._channel_requests.pop(key, None)
+
+        if key not in self._channel_requests:
+            self._channel_requests[key] = asyncio.create_task(fetch_and_cache())
+        return await asyncio.shield(self._channel_requests[key])
+
+    async def _fetch_channel_latest_videos(self, channel_id: str, limit: int) -> List[Dict[str, Any]]:
+        """One channel request, without extracting each video's streams."""
         # Construction channel URL (videos tab)
         # Handle if channel_id is actually a handle (@...) or ID
         if channel_id.startswith('@'):
@@ -557,8 +649,12 @@ class YtDlpService:
         opts = {
             'quiet': True,
             'no_warnings': True,
-            'extract_flat': False, # Get full info to ensure dates are present
+            'extract_flat': True,
             'skip_download': True,
+            'socket_timeout': 4,
+            'retries': 0,
+            'extractor_retries': 0,
+            'extractor_args': {'youtubetab': {'approximate_date': ['true']}},
             'playlistend': limit, # Limit number of items
             'no_playlist': False,
             # Skip individual entries that fail (e.g. upcoming premieres,
@@ -568,37 +664,37 @@ class YtDlpService:
         }
         
         try:
-            loop = asyncio.get_event_loop()
-            with yt_dlp.YoutubeDL(opts) as ydl:
-                info = await loop.run_in_executor(
-                    None,
-                    partial(ydl.extract_info, url, download=False)
-                )
+            def extract():
+                with yt_dlp.YoutubeDL(opts) as ydl:
+                    return ydl.extract_info(url, download=False)
+
+            info = await asyncio.get_running_loop().run_in_executor(self._channel_executor, extract)
                 
-                if not info or 'entries' not in info:
-                    return []
+            if not info or 'entries' not in info:
+                return []
                 
-                results = []
-                for entry in info['entries']:
-                    if entry:
-                        # Map to common format
-                        vid_id = entry.get('id')
-                        if vid_id:
-                            results.append({
-                                "id": vid_id,
-                                "title": entry.get('title'),
-                                "thumbnail": entry.get('thumbnail') or f"https://i.ytimg.com/vi/{vid_id}/hqdefault.jpg",
-                                "author": entry.get('uploader') or info.get('uploader') or info.get('title'),
-                                "channel_id": channel_id,
-                                "view_count": entry.get('view_count'),
-                                "duration": entry.get('duration'),
-                                "view_count": entry.get('view_count'),
-                                "duration": entry.get('duration'),
-                                "view_count": entry.get('view_count'),
-                                "duration": entry.get('duration'),
-                                "published_at": self._format_date(entry.get('upload_date') or entry.get('release_date'))
-                            })
-                return results
+            results = []
+            for entry in info['entries']:
+                if entry:
+                    # Map to common format
+                    vid_id = entry.get('id')
+                    if vid_id:
+                        results.append({
+                            "id": vid_id,
+                            "title": entry.get('title'),
+                            "thumbnail": entry.get('thumbnail') or (entry.get('thumbnails') or [{}])[-1].get('url') or f"https://i.ytimg.com/vi/{vid_id}/hqdefault.jpg",
+                            "author": entry.get('uploader') or info.get('uploader') or info.get('title'),
+                            "channel_id": channel_id,
+                            "view_count": entry.get('view_count'),
+                            "duration": entry.get('duration') or parse_duration(entry.get('duration_string')),
+                            "is_live": entry.get('is_live', False),
+                            "live_status": entry.get('live_status'),
+                            "published_at": self._format_date(entry.get('upload_date') or entry.get('release_date')) or (
+                                datetime.fromtimestamp(entry['timestamp'], timezone.utc).strftime('%Y-%m-%d')
+                                if entry.get('timestamp') else None
+                            ),
+                        })
+            return results
         except Exception as e:
             print(f"yt-dlp channel fetch error: {e}")
             return []

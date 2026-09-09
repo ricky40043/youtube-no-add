@@ -7,6 +7,8 @@ import jieba
 from services.ytdlp_service import ytdlp_service
 from services.invidious_service import invidious_service
 from services.cache_service import cache_service
+from services.video_metadata_service import video_metadata_service
+from services.youtube_url import extract_youtube_video_id
 from config import get_settings
 
 router = APIRouter()
@@ -19,7 +21,7 @@ def _sse(event: str, payload: dict) -> str:
 async def _stream_search_batches(q: str, sort: str = "relevance"):
     """Yield search results in batches, up to fifty items."""
     settings = get_settings()
-    full_key = f"search:full:{q}:{sort}"
+    full_key = f"search:v2:full:{q}:{sort}"
     cached = await cache_service.get(full_key)
     accumulated = []
     seen = set()
@@ -68,9 +70,15 @@ async def _stream_search_batches(q: str, sort: str = "relevance"):
 
 @router.get("/stream")
 async def stream_search_videos(
-    q: str = Query(..., description="搜尋關鍵字"),
+    q: str = Query(..., description="搜尋關鍵字或 YouTube 影片網址"),
     sort: str = Query("relevance", description="排序: relevance / date / views"),
 ):
+    if extract_youtube_video_id(q):
+        video = await video_metadata_service.get(q)
+        return StreamingResponse(iter([
+            _sse('batch', {'results': [video], 'count': 1, 'done': True}),
+            _sse('complete', {'count': 1, 'direct_video': True}),
+        ]), media_type='text/event-stream', headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'})
     return StreamingResponse(
         _stream_search_batches(q, sort),
         media_type="text/event-stream",
@@ -80,7 +88,7 @@ async def stream_search_videos(
 
 @router.get("")
 async def search_videos(
-    q: str = Query(..., description="搜尋關鍵字"),
+    q: str = Query(..., description="搜尋關鍵字或 YouTube 影片網址"),
     max_results: int = Query(20, ge=1, le=50, description="最大結果數"),
     offset: int = Query(0, ge=0, description="跳過的結果數 (分頁用)"),
     sort: str = Query("relevance", description="排序: relevance / date / views")
@@ -93,13 +101,17 @@ async def search_videos(
     - **offset**: 分頁偏移量
     - **sort**: 排序方式 (relevance 預設 / date / views)
     """
+    if extract_youtube_video_id(q):
+        return {'results': [await video_metadata_service.get(q)] if offset == 0 else []}
     settings = get_settings()
 
     # Fetch a larger result set ONCE and cache it, then paginate in-memory.
     # This avoids re-running ytsearch on every scroll (slow + duplicate/drift),
     # and keeps pagination stable for the lifetime of the cache entry.
     FULL_SIZE = 50
-    full_key = f"search:full:{q}:{sort}"
+    # Keep stale search results (which may not contain publication metadata)
+    # separate from the current response schema.
+    full_key = f"search:v2:full:{q}:{sort}"
     full = await cache_service.get(full_key)
 
     if full is None:
@@ -126,7 +138,8 @@ async def get_trending(
     from services.cache_service import cache_service
     
     # Check cache first (30 minutes)
-    cache_key = f"trending:{region}"
+    # Invalidate legacy trending payloads that predate published_at.
+    cache_key = f"trending:v2:{region}"
     cached = await cache_service.get(cache_key)
     if cached:
         return {"results": cached}
@@ -150,6 +163,8 @@ async def get_suggestions(
     
     - **q**: 部分關鍵字
     """
+    if extract_youtube_video_id(q):
+        return {'suggestions': []}
     # Search with limited results for suggestions
     results = await ytdlp_service.search(q, max_results=8)
 
@@ -184,6 +199,8 @@ async def get_search_related(
     - **limit**: 返回的推薦數量
     - **offset**: 分頁偏移
     """
+    if extract_youtube_video_id(q):
+        return {'results': []}
     # Fast keyword extraction
     cleaned_q = re.sub(r'[^\w\s\u4e00-\u9fff]', ' ', q).strip()
     words = [w.strip() for w in jieba.cut(cleaned_q) if len(w.strip()) > 1]

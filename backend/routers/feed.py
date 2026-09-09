@@ -41,6 +41,7 @@ async def run_sync_task(user_id: int):
             # the next view cannot serve a pre-sync recommendation snapshot.
             from services.cache_service import cache_service
             await cache_service.delete_pattern(f"feed:{user_id}:*")
+            await cache_service.delete_pattern(f"feed:v2:{user_id}:*")
             await cache_service.delete_pattern(f"feed:precomputed:{user_id}*")
             await cache_service.delete(f"subs_feed:{user_id}")
             
@@ -67,13 +68,15 @@ async def get_feed(
     user_id = current_user.id if current_user else 'anonymous'
     print(f"[FEED] Request started, cursor={cursor}, limit={limit}, user={user_id}")
     
-    # Check cache first (only for first page, anonymous users, or users without history)
-    cache_key = f"feed:{user_id}:{cursor or '0'}:{limit}"
-    if not current_user or not cursor:
-        cached = await cache_service.get(cache_key)
-        if cached:
-            print(f"[FEED] Cache hit for {cache_key}")
-            return cached
+    # Read cached pages for signed-in users too; revisiting a page must not
+    # rerun all of the recommendation searches.
+    # Bump the key when the feed response schema changes so legacy cached
+    # cards without publication metadata cannot hide the upload time forever.
+    cache_key = f"feed:v2:{user_id}:{cursor or '0'}:{limit}"
+    cached = await cache_service.get(cache_key)
+    if cached:
+        print(f"[FEED] Cache hit for {cache_key}")
+        return cached
     
     # Only compute if not cached
     from services.ytdlp_service import ytdlp_service

@@ -230,6 +230,8 @@ input {
   color: var(--text-primary);
   font-size: 0.75rem;
   font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
   border-radius: var(--radius-sm);
 }
 
