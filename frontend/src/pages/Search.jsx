@@ -121,7 +121,7 @@ function Search() {
                     hasMoreRef.current = false
                     setHasMore(false)
                     setHasMoreRelated(false)
-                    const video = await getVideoMetadata(videoId)
+                    const video = await getVideoMetadata(videoId, { priority: true })
                     if (controller.signal.aborted || requestId !== searchRequestRef.current) return
                     setVideos([video])
                     if (video.thumbnail) updateSearchHistoryThumbnail(query, video.thumbnail)

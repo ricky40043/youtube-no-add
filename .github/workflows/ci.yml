@@ -23,6 +23,8 @@ jobs:
         run: pip install -r requirements.txt
       - name: Syntax check (compileall)
         run: python -m compileall . -x 'venv'
+      - name: Metadata and URL search regressions
+        run: python test_metadata_search.py
 
   frontend:
     name: Frontend
