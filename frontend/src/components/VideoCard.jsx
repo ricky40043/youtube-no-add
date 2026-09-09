@@ -29,6 +29,9 @@ function VideoCard({ video, type = 'vertical' }) {
     const navigate = useNavigate()
 
     const thumbnail = video.thumbnail || `https://i.ytimg.com/vi/${video.id}/hqdefault.jpg`
+    // Keep compatibility with cached/legacy API responses that only contain
+    // yt-dlp's upload_date field.
+    const publishedDate = video.published_at || video.upload_date
 
     const handleClick = () => {
         if (video.channel_id && !video.id) {
@@ -78,10 +81,10 @@ function VideoCard({ video, type = 'vertical' }) {
                 <p className="video-author" style={isHorizontal ? { fontSize: '0.8rem' } : {}}>{video.author}</p>
                 <div className="video-meta" style={isHorizontal ? { fontSize: '0.75rem' } : { display: 'flex', alignItems: 'center', gap: '4px', marginTop: '4px' }}>
                     <span>{formatViews(video.view_count)}</span>
-                    {video.published_at && (
+                    {publishedDate && (
                         <>
                             <span>•</span>
-                            <span>{formatTimeAgo(video.published_at)}</span>
+                            <span>{formatTimeAgo(publishedDate)}</span>
                         </>
                     )}
                 </div>

@@ -359,7 +359,13 @@ class YtDlpService:
                             'author': entry.get('uploader'),
                             'channel_id': entry.get('channel_id'),
                             'view_count': entry.get('view_count'),
-                            'published_at': entry.get('upload_date'),
+                            # yt-dlp returns upload_date as YYYYMMDD in flat
+                            # search results. Normalize it to the same
+                            # YYYY-MM-DD shape used by the rest of the API so
+                            # the home page can reliably render relative time.
+                            'published_at': self._format_date(
+                                entry.get('upload_date') or entry.get('release_date')
+                            ),
                         })
                 
                 # Ordering: yt-dlp already returns YouTube's relevance order.
