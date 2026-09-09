@@ -329,7 +329,10 @@ class YtDlpService:
         opts = {
             'quiet': True,
             'no_warnings': True,
-            'extract_flat': True, # FAST mode
+            # Flat search entries frequently omit upload metadata.  Resolve
+            # the lightweight video entries so the home cards receive the
+            # publication timestamp as well as title/thumbnail.
+            'extract_flat': False,
             'skip_download': True,
             'no_playlist': True,
             'playliststart': start,
@@ -456,9 +459,11 @@ class YtDlpService:
         if len(date_str) == 8 and date_str.isdigit():
             return f"{date_str[:4]}-{date_str[4:6]}-{date_str[6:]}"
         
-        # Handle ISO-like formats (e.g. 2026-02-21T00:00:00)
+        # Preserve the time component when yt-dlp provides one.  Truncating
+        # this to YYYY-MM-DD makes a video uploaded today look like it was
+        # uploaded many hours ago.
         if 'T' in date_str or '-' in date_str:
-            return date_str[:10]
+            return date_str
             
         return date_str
 
