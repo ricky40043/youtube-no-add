@@ -1,0 +1,11 @@
+services:
+  backend:
+    env_file:
+      - ./.recovery-mail.env
+    networks:
+      - default
+      - shared_mail
+networks:
+  shared_mail:
+    external: true
+    name: ricky-shared-mail

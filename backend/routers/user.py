@@ -75,7 +75,7 @@ class UserResponse(BaseModel):
 
 class PasswordChangeRequest(BaseModel):
     current_password: str
-    new_password: str
+    new_password: str = Field(min_length=8, max_length=128)
 
 
 class RecoveryEmailRequest(BaseModel):
@@ -92,8 +92,8 @@ class ForgotPasswordRequest(BaseModel):
 
 
 class ResetPasswordRequest(BaseModel):
-    token: str
-    new_password: str
+    token: str = Field(min_length=20, max_length=2048)
+    new_password: str = Field(min_length=8, max_length=128)
 
 
 def legacy_hash_password(password: str) -> str:
@@ -172,7 +172,7 @@ async def consume_account_token(
         AccountToken.token_hash == hash_account_token(raw_token),
         AccountToken.purpose == purpose,
         AccountToken.used_at.is_(None),
-    ))
+    ).with_for_update())
     account_token = result.scalars().first()
     if not account_token or account_token.expires_at < datetime.utcnow():
         raise HTTPException(status_code=400, detail="連結無效或已經過期")
@@ -286,7 +286,7 @@ async def request_recovery_email(
         raise HTTPException(status_code=400, detail="此 Email 已由其他帳戶使用")
 
     token = await create_account_token(db, current_user.id, "verify_email", email)
-    url = f"{settings.frontend_url}/auth?mode=verify-email&token={quote(token)}"
+    url = f"{settings.frontend_url}/auth?mode=verify-email#token={quote(token)}"
     await email_service.send_account_link(email, "驗證恢復信箱", "請點擊下方連結驗證恢復信箱：", url)
     return {"message": "驗證信已寄出"}
 
@@ -300,6 +300,10 @@ async def verify_recovery_email(request: TokenRequest, db: AsyncSession = Depend
         raise HTTPException(status_code=404, detail="帳戶不存在")
     user.email = account_token.pending_value
     user.email_verified = True
+    await db.execute(update(AccountToken).where(
+        AccountToken.user_id == user.id,
+        AccountToken.used_at.is_(None),
+    ).values(used_at=datetime.utcnow()))
     await db.commit()
     return {"message": "恢復信箱驗證完成"}
 
@@ -316,7 +320,7 @@ async def forgot_password(request: ForgotPasswordRequest, db: AsyncSession = Dep
     user = result.scalars().first()
     if user and user.email and user.email_verified:
         token = await create_account_token(db, user.id, "reset_password")
-        url = f"{settings.frontend_url}/auth?mode=reset-password&token={quote(token)}"
+        url = f"{settings.frontend_url}/auth?mode=reset-password#token={quote(token)}"
         try:
             await email_service.send_account_link(
                 user.email,
@@ -325,7 +329,7 @@ async def forgot_password(request: ForgotPasswordRequest, db: AsyncSession = Dep
                 url,
             )
         except (OSError, smtplib.SMTPException) as error:
-            print(f"[ERROR] Failed to send password reset email: {error}")
+            print("[ERROR] Failed to send password reset email; inspect shared mail status")
     return {"message": "若帳戶已設定恢復信箱，我們會寄出重設連結"}
 
 

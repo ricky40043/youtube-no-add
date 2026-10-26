@@ -20,7 +20,14 @@ function Auth() {
     const [loading, setLoading] = useState(false)
     const navigate = useNavigate()
     const location = useLocation()
-    const token = searchParams.get('token') || ''
+    const token = useRef(searchParams.get('token') || new URLSearchParams(window.location.hash.slice(1)).get('token') || '').current
+    useEffect(() => {
+        if (token) {
+            const cleaned = new URLSearchParams(window.location.search)
+            cleaned.delete('token')
+            window.history.replaceState(null, '', window.location.pathname + (cleaned.size ? '?' + cleaned.toString() : ''))
+        }
+    }, [token])
     const verificationStarted = useRef(false)
 
     const changeMode = (nextMode) => {

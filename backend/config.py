@@ -25,6 +25,8 @@ class Settings(BaseSettings):
     frontend_url: str = "http://localhost:5173"
 
     # Transactional email (optional until recovery email is configured)
+    mail_service_url: str = ""
+    mail_service_key: str = ""
     smtp_host: str = ""
     smtp_port: int = 587
     smtp_username: str = ""
