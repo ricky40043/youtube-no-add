@@ -8,7 +8,7 @@ const AUTH_MODES = ['login', 'register', 'forgot', 'reset-password', 'verify-ema
 
 function Auth() {
     const [searchParams, setSearchParams] = useSearchParams()
-    const initialMode = searchParams.get('mode')
+    const initialMode = searchParams.get('mode') || ((searchParams.has('token') || new URLSearchParams(window.location.hash.slice(1)).has('token')) ? 'reset-password' : null)
     const [mode, setMode] = useState(AUTH_MODES.includes(initialMode) ? initialMode : 'login')
     const [username, setUsername] = useState('')
     const [password, setPassword] = useState('')
